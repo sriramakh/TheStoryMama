@@ -6,10 +6,14 @@ import { authConfig } from "./auth.config";
 export const { handlers, signIn, signOut, auth } = NextAuth({
   ...authConfig,
   secret: process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET,
+  // No adapter — purely JWT-based. OAuth accounts are NOT persisted to a DB.
+  // The user's Google profile is stored directly in the JWT.
   providers: [
     Google({
       clientId: process.env.AUTH_GOOGLE_ID || process.env.GOOGLE_CLIENT_ID || "",
       clientSecret: process.env.AUTH_GOOGLE_SECRET || process.env.GOOGLE_CLIENT_SECRET || "",
+      // Allow sign-in without linking to a database account
+      allowDangerousEmailAccountLinking: true,
     }),
     Credentials({
       name: "Email",
@@ -34,4 +38,33 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       },
     }),
   ],
+  callbacks: {
+    ...authConfig.callbacks,
+    async jwt({ token, user, account, profile }) {
+      // On initial sign-in, populate token with user data
+      if (user) {
+        token.id = user.id;
+        token.name = user.name;
+        token.email = user.email;
+        token.picture = user.image;
+      }
+      // For Google OAuth, use Google profile data
+      if (account?.provider === "google" && profile) {
+        token.id = profile.sub;
+        token.name = profile.name;
+        token.email = profile.email;
+        token.picture = (profile as Record<string, unknown>).picture as string;
+      }
+      return token;
+    },
+    async session({ session, token }) {
+      if (session.user) {
+        session.user.id = (token.id as string) || "";
+        session.user.name = (token.name as string) || "";
+        session.user.email = (token.email as string) || "";
+        session.user.image = (token.picture as string) || "";
+      }
+      return session;
+    },
+  },
 });
