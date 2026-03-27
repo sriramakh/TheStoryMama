@@ -6,8 +6,18 @@ import { authConfig } from "./auth.config";
 export const { handlers, signIn, signOut, auth } = NextAuth({
   ...authConfig,
   secret: process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET,
-  // No adapter — purely JWT-based. OAuth accounts are NOT persisted to a DB.
-  // The user's Google profile is stored directly in the JWT.
+  trustHost: true,
+  cookies: {
+    pkceCodeVerifier: {
+      name: "next-auth.pkce.code_verifier",
+      options: {
+        httpOnly: true,
+        sameSite: "none",
+        path: "/",
+        secure: true,
+      },
+    },
+  },
   providers: [
     Google({
       clientId: process.env.AUTH_GOOGLE_ID || process.env.GOOGLE_CLIENT_ID || "",
