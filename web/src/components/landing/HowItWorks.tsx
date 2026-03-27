@@ -5,15 +5,15 @@ const steps = [
     icon: Wand2,
     title: "Describe Your Story",
     description:
-      "Tell us about the adventure you'd like — a brave penguin, a magical forest, a sleepy bunny. Or let our AI surprise you!",
+      "Tell us about the adventure you'd like — a brave penguin, a magical forest, a sleepy bunny. Or let us surprise you with something wonderful!",
     color: "bg-[var(--color-pastel-lavender)]",
     iconColor: "text-purple-500",
   },
   {
     icon: Palette,
-    title: "We Create the Magic",
+    title: "We Bring It to Life",
     description:
-      "Our AI crafts a beautiful illustrated story with 10-15 scenes in your chosen art style — from Pixar 3D to Studio Ghibli.",
+      "A beautifully illustrated story is created with 10-15 scenes in your chosen art style — claymation, felt plushie, animation movie, and more.",
     color: "bg-[var(--color-pastel-pink)]",
     iconColor: "text-pink-500",
   },

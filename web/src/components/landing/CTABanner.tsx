@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Sparkles } from "lucide-react";
+import { Heart, BookOpen } from "lucide-react";
 
 export function CTABanner() {
   return (
@@ -12,29 +12,30 @@ export function CTABanner() {
           <div className="absolute bottom-4 right-8 w-24 h-24 rounded-full bg-white/20 blur-xl" />
 
           <h2 className="relative text-3xl sm:text-4xl font-bold text-[var(--color-warm-brown)] font-[family-name:var(--font-quicksand)]">
-            Start Creating Magical Stories Today
+            Make Bedtime the Best Part of the Day
           </h2>
           <p className="relative mt-4 text-lg text-[var(--color-warm-brown)]/80 max-w-xl mx-auto">
-            Join thousands of parents who are making bedtime the best part of
-            the day. Your first custom story is just minutes away.
+            Whether it&apos;s a cozy story before sleep or a rainy afternoon
+            adventure, every story becomes a memory you share together.
           </p>
           <div className="relative mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
-            <Link href="/create">
+            <Link href="/library">
               <Button
                 size="lg"
                 className="text-base px-8 py-6 rounded-2xl bg-white text-[var(--color-warm-brown)] hover:bg-white/90 shadow-lg gap-2"
               >
-                <Sparkles className="h-5 w-5" />
-                Create Your First Story
+                <BookOpen className="h-5 w-5" />
+                Browse Stories
               </Button>
             </Link>
-            <Link href="/pricing">
+            <Link href="/create">
               <Button
                 size="lg"
                 variant="ghost"
-                className="text-base px-8 py-6 rounded-2xl text-[var(--color-warm-brown)] hover:bg-white/20"
+                className="text-base px-8 py-6 rounded-2xl text-[var(--color-warm-brown)] hover:bg-white/20 gap-2"
               >
-                View Pricing
+                <Heart className="h-5 w-5" />
+                Create One for Your Child
               </Button>
             </Link>
           </div>
