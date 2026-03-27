@@ -103,7 +103,14 @@ async def get_scene_image(story_id: str, scene_num: int):
     path = story_service.get_scene_image_path(story_id, scene_num)
     if path is None:
         raise HTTPException(status_code=404, detail="Scene image not found")
-    return FileResponse(path)
+    # Cache images aggressively — they never change
+    return FileResponse(
+        path,
+        headers={
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "CDN-Cache-Control": "public, max-age=31536000",
+        },
+    )
 
 
 @router.get("/stories/{story_id}/pdf")

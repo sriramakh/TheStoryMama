@@ -239,13 +239,14 @@ class StoryService:
 
     def get_scene_image_path(self, story_id: str, scene_num: int) -> str | None:
         folder = os.path.join(self.stories_dir, story_id)
-        raw_path = os.path.join(folder, f"scene_{scene_num:02d}_raw.png")
-        if os.path.exists(raw_path):
-            return raw_path
-        # Fallback to overlaid version
+        # Serve the optimized JPG first (600KB vs 3MB raw PNG)
         overlaid_path = os.path.join(folder, f"scene_{scene_num:02d}.jpg")
         if os.path.exists(overlaid_path):
             return overlaid_path
+        # Fallback to raw PNG if no JPG exists
+        raw_path = os.path.join(folder, f"scene_{scene_num:02d}_raw.png")
+        if os.path.exists(raw_path):
+            return raw_path
         return None
 
     def get_pdf_path(self, story_id: str) -> str | None:
