@@ -1,71 +1,70 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { db, readingHistory } from "@/lib/db";
-import { eq, and, desc, sql } from "drizzle-orm";
 
-// GET /api/reading — get user's reading activity (continue reading + recommendations)
+// In-memory reading history (per-server instance, resets on redeploy)
+// For production, replace with Supabase/PlanetScale/Redis
+const readingHistory = new Map<string, Map<string, {
+  storyId: string;
+  currentScene: number;
+  totalScenes: number;
+  completed: boolean;
+  category: string;
+  animationStyle: string;
+  lastReadAt: string;
+}>>();
+
+function getUserHistory(userId: string) {
+  if (!readingHistory.has(userId)) {
+    readingHistory.set(userId, new Map());
+  }
+  return readingHistory.get(userId)!;
+}
+
+// GET /api/reading
 export async function GET() {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ continueReading: [], recommended: [] });
   }
 
-  const userId = session.user.id;
+  const history = getUserHistory(session.user.id);
 
-  // Continue Reading: in-progress stories (not completed), sorted by last read
-  const inProgress = await db
-    .select()
-    .from(readingHistory)
-    .where(and(eq(readingHistory.userId, userId), eq(readingHistory.completed, false)))
-    .orderBy(desc(readingHistory.lastReadAt))
-    .limit(6)
-    .all();
-
-  // Get user's most-read categories for recommendations
-  const categoryPrefs = await db
-    .select({
-      category: readingHistory.category,
-      count: sql<number>`count(*)`.as("count"),
-    })
-    .from(readingHistory)
-    .where(eq(readingHistory.userId, userId))
-    .groupBy(readingHistory.category)
-    .orderBy(desc(sql`count(*)`))
-    .limit(3)
-    .all();
-
-  // Recently completed stories for "read again" suggestions
-  const recentlyCompleted = await db
-    .select()
-    .from(readingHistory)
-    .where(and(eq(readingHistory.userId, userId), eq(readingHistory.completed, true)))
-    .orderBy(desc(readingHistory.lastReadAt))
-    .limit(10)
-    .all();
-
-  // All read story IDs (to exclude from recommendations)
-  const readStoryIds = new Set([
-    ...inProgress.map((r) => r.storyId),
-    ...recentlyCompleted.map((r) => r.storyId),
-  ]);
-
-  return NextResponse.json({
-    continueReading: inProgress.map((r) => ({
+  const inProgress = Array.from(history.values())
+    .filter((r) => !r.completed)
+    .sort((a, b) => b.lastReadAt.localeCompare(a.lastReadAt))
+    .slice(0, 6)
+    .map((r) => ({
       storyId: r.storyId,
       currentScene: r.currentScene,
       totalScenes: r.totalScenes,
-      progress: Math.round(((r.currentScene || 1) / (r.totalScenes || 1)) * 100),
+      progress: Math.round((r.currentScene / r.totalScenes) * 100),
       lastReadAt: r.lastReadAt,
       category: r.category,
       animationStyle: r.animationStyle,
-    })),
-    preferredCategories: categoryPrefs.map((c) => c.category).filter(Boolean),
-    recentlyRead: recentlyCompleted.map((r) => r.storyId),
-    readStoryIds: Array.from(readStoryIds),
+    }));
+
+  // Get preferred categories from reading history
+  const catCounts = new Map<string, number>();
+  for (const r of history.values()) {
+    if (r.category) {
+      catCounts.set(r.category, (catCounts.get(r.category) || 0) + 1);
+    }
+  }
+  const preferredCategories = Array.from(catCounts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([cat]) => cat);
+
+  const readStoryIds = Array.from(history.keys());
+
+  return NextResponse.json({
+    continueReading: inProgress,
+    preferredCategories,
+    readStoryIds,
   });
 }
 
-// POST /api/reading — save reading progress
+// POST /api/reading
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -79,39 +78,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "storyId required" }, { status: 400 });
   }
 
-  const userId = session.user.id;
-  const completed = currentScene >= totalScenes;
-
-  // Upsert reading progress
-  const existing = await db
-    .select()
-    .from(readingHistory)
-    .where(and(eq(readingHistory.userId, userId), eq(readingHistory.storyId, storyId)))
-    .get();
-
-  if (existing) {
-    await db
-      .update(readingHistory)
-      .set({
-        currentScene,
-        totalScenes,
-        completed,
-        category: category || existing.category,
-        animationStyle: animationStyle || existing.animationStyle,
-        lastReadAt: new Date().toISOString(),
-      })
-      .where(eq(readingHistory.id, existing.id));
-  } else {
-    await db.insert(readingHistory).values({
-      userId,
-      storyId,
-      currentScene,
-      totalScenes,
-      completed,
-      category,
-      animationStyle,
-    });
-  }
+  const history = getUserHistory(session.user.id);
+  history.set(storyId, {
+    storyId,
+    currentScene,
+    totalScenes,
+    completed: currentScene >= totalScenes,
+    category: category || "",
+    animationStyle: animationStyle || "",
+    lastReadAt: new Date().toISOString(),
+  });
 
   return NextResponse.json({ ok: true });
 }
