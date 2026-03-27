@@ -13,17 +13,27 @@ export async function generateMetadata({
   const { storyId } = await params;
   try {
     const story = await getStory(storyId);
+    const characters = story.characters?.map((c) => c.name).join(", ");
+    const description = story.moral
+      ? `${story.moral} — A bedtime story featuring ${characters}.`
+      : `Read "${story.title}" — a beautiful illustrated bedtime story featuring ${characters}.`;
+    const imageUrl = `${API_URL}/api/v1/stories/${storyId}/scenes/1/image`;
+
     return {
       title: story.title,
-      description:
-        story.moral ||
-        `Read "${story.title}" — a beautiful illustrated bedtime story for children.`,
+      description,
       openGraph: {
-        title: `${story.title} | TheStoryMama`,
-        description:
-          story.moral ||
-          `A magical bedtime story featuring ${story.characters?.map((c) => c.name).join(", ")}.`,
-        images: [{ url: `${API_URL}/api/v1/stories/${storyId}/scenes/1/image`, width: 1024, height: 1536 }],
+        title: story.title,
+        description,
+        siteName: "TheStoryMama",
+        type: "article",
+        images: [{ url: imageUrl, width: 1024, height: 1536, alt: story.title }],
+      },
+      twitter: {
+        card: "summary_large_image",
+        title: story.title,
+        description,
+        images: [imageUrl],
       },
     };
   } catch {

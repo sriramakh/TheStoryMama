@@ -234,7 +234,7 @@ def _load_all_stories() -> list[dict]:
         return []
 
     results = []
-    for folder_name in sorted(os.listdir(stories_dir)):
+    for folder_name in sorted(os.listdir(stories_dir), reverse=True):
         folder_path = os.path.join(stories_dir, folder_name)
         json_path = os.path.join(folder_path, "story_data.json")
 

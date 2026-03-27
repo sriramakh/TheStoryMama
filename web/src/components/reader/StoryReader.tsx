@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, ChevronRight, Download, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, X, Share2, Check } from "lucide-react";
 import { API_URL } from "@/lib/constants";
 import type { Story } from "@/types/story";
 
@@ -12,8 +12,29 @@ export function StoryReader({ story }: { story: Story }) {
   const totalScenes = story.scenes.length;
   const scene = story.scenes[currentScene];
   const router = useRouter();
+  const [shared, setShared] = useState(false);
   const touchStartX = useRef(0);
   const touchEndX = useRef(0);
+
+  async function handleShare() {
+    const url = window.location.href;
+    const text = `Read "${story.title}" — a beautiful bedtime story on TheStoryMama`;
+
+    // Use native share on mobile (WhatsApp, iMessage, etc.)
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: story.title, text, url });
+        return;
+      } catch {}
+    }
+
+    // Fallback: copy link
+    try {
+      await navigator.clipboard.writeText(url);
+      setShared(true);
+      setTimeout(() => setShared(false), 2000);
+    } catch {}
+  }
 
   const goNext = useCallback(() => {
     setCurrentScene((s) => Math.min(s + 1, totalScenes - 1));
@@ -102,9 +123,22 @@ export function StoryReader({ story }: { story: Story }) {
           <h1 className="text-sm sm:text-lg font-bold text-[var(--color-warm-brown)] font-[family-name:var(--font-quicksand)] truncate flex-1 mr-2">
             {story.title}
           </h1>
-          <span className="text-xs sm:text-sm text-muted-foreground whitespace-nowrap">
-            {currentScene + 1}/{totalScenes}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs sm:text-sm text-muted-foreground whitespace-nowrap">
+              {currentScene + 1}/{totalScenes}
+            </span>
+            <button
+              onClick={handleShare}
+              className="flex-shrink-0 h-8 w-8 rounded-full bg-white/60 flex items-center justify-center hover:bg-white transition-colors"
+              aria-label="Share story"
+            >
+              {shared ? (
+                <Check className="h-4 w-4 text-emerald-600" />
+              ) : (
+                <Share2 className="h-4 w-4 text-[var(--color-warm-brown)]" />
+              )}
+            </button>
+          </div>
         </div>
       </div>
 
