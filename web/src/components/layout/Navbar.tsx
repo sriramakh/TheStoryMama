@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-import { BookOpen, Menu, Sparkles, User } from "lucide-react";
+import { Menu, Heart, User } from "lucide-react";
 
 const navLinks = [
   { href: "/library", label: "Story Library" },
@@ -20,9 +21,13 @@ export function Navbar() {
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2 group">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--color-pastel-pink)] transition-transform group-hover:scale-110">
-            <BookOpen className="h-5 w-5 text-[var(--color-warm-brown)]" />
-          </div>
+          <Image
+            src="/logo.png"
+            alt="TheStoryMama"
+            width={36}
+            height={36}
+            className="rounded-lg transition-transform group-hover:scale-110"
+          />
           <span className="text-xl font-bold tracking-tight text-[var(--color-warm-brown)] font-[family-name:var(--font-quicksand)]">
             TheStoryMama
           </span>
@@ -54,7 +59,7 @@ export function Navbar() {
               size="sm"
               className="gap-2 bg-[var(--color-pastel-pink)] text-[var(--color-warm-brown)] hover:bg-[var(--color-pastel-rose)] shadow-sm"
             >
-              <Sparkles className="h-4 w-4" />
+              <Heart className="h-4 w-4" />
               Create Story
             </Button>
           </Link>
@@ -86,7 +91,7 @@ export function Navbar() {
               </Link>
               <Link href="/create" onClick={() => setMobileOpen(false)}>
                 <Button className="w-full gap-2 bg-[var(--color-pastel-pink)] text-[var(--color-warm-brown)] hover:bg-[var(--color-pastel-rose)]">
-                  <Sparkles className="h-4 w-4" />
+                  <Heart className="h-4 w-4" />
                   Create Story
                 </Button>
               </Link>

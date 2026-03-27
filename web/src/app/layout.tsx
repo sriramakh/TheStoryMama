@@ -22,15 +22,25 @@ export const metadata: Metadata = {
     template: "%s | TheStoryMama",
   },
   description:
-    "Beautiful AI-generated bedtime stories for toddlers. Browse 1000+ free illustrated stories or create personalized storybooks for your little one.",
+    "Beautiful bedtime stories made with love for your little one. Browse free illustrated stories or create personalized storybooks.",
   keywords: [
     "bedtime stories",
     "children stories",
     "toddler stories",
     "personalized storybook",
-    "AI storybook",
     "kids bedtime",
+    "free bedtime stories",
+    "illustrated stories for kids",
   ],
+  icons: {
+    icon: "/favicon.ico",
+    apple: "/apple-touch-icon.png",
+  },
+  openGraph: {
+    siteName: "TheStoryMama",
+    type: "website",
+    images: [{ url: "/og-logo.png", width: 512, height: 512 }],
+  },
 };
 
 export default function RootLayout({

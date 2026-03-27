@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { BookOpen, Heart } from "lucide-react";
+import Image from "next/image";
+import { Heart } from "lucide-react";
 
 export function Footer() {
   return (
@@ -9,9 +10,13 @@ export function Footer() {
           {/* Brand */}
           <div className="col-span-1 sm:col-span-2 lg:col-span-1">
             <Link href="/" className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-[var(--color-pastel-pink)]">
-                <BookOpen className="h-4 w-4 text-[var(--color-warm-brown)]" />
-              </div>
+              <Image
+                src="/logo.png"
+                alt="TheStoryMama"
+                width={32}
+                height={32}
+                className="rounded-lg"
+              />
               <span className="text-lg font-bold text-[var(--color-warm-brown)] font-[family-name:var(--font-quicksand)]">
                 TheStoryMama
               </span>
