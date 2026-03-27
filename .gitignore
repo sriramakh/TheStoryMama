@@ -1,0 +1,53 @@
+# Dependencies
+node_modules/
+web/node_modules/
+web/.next/
+
+# Python
+__pycache__/
+*.pyc
+storybook/venv/
+*.egg-info/
+
+# Environment files
+.env
+.env.local
+.env.production
+web/.env.local
+web/.env.production
+
+# Generated stories (too large for git — ~3GB+)
+storybook/stories/
+storybook/stories_plots/
+storybook/stories_grok_sample/
+storybook/stories_kling_sample/
+storybook/stories_kling_v3_sample/
+storybook/style_samples/
+storybook/style_samples_new/
+storybook/style_samples_round3/
+storybook/style_samples_round4/
+storybook/style_samples_round5/
+
+# Batch logs and progress
+storybook/batch_images.log
+storybook/batch_progress.json
+storybook/curated_24.log
+storybook/api_server.log
+
+# SQLite databases
+*.db
+*.sqlite
+*.sqlite3
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Build artifacts
+dist/
+build/
+web/data/
