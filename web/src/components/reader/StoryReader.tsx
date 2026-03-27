@@ -36,6 +36,24 @@ export function StoryReader({ story }: { story: Story }) {
     return () => window.removeEventListener("keydown", handleKey);
   }, [goNext, goPrev]);
 
+  // Save reading progress (debounced — fires on scene change)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetch("/api/reading", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          storyId: story.id,
+          currentScene: currentScene + 1,
+          totalScenes,
+          category: story.category,
+          animationStyle: story.animation_style,
+        }),
+      }).catch(() => {}); // Silently fail if not logged in
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [currentScene, story.id, totalScenes, story.category, story.animation_style]);
+
   // Swipe handlers for mobile
   function onTouchStart(e: React.TouchEvent) {
     touchStartX.current = e.targetTouches[0].clientX;

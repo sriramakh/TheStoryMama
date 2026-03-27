@@ -63,6 +63,19 @@ export const verificationTokens = sqliteTable("verification_tokens", {
   expires: integer("expires", { mode: "timestamp" }).notNull(),
 });
 
+export const readingHistory = sqliteTable("reading_history", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  storyId: text("story_id").notNull(),           // folder_name from stories/
+  currentScene: integer("current_scene").default(1),
+  totalScenes: integer("total_scenes").default(1),
+  completed: integer("completed", { mode: "boolean" }).default(false),
+  category: text("category"),                     // primary category for recommendations
+  animationStyle: text("animation_style"),
+  lastReadAt: text("last_read_at").default(sql`(datetime('now'))`),
+  startedAt: text("started_at").default(sql`(datetime('now'))`),
+});
+
 // ── Create tables on startup ────────────────────────────────────────────────
 
 sqlite.exec(`
@@ -101,4 +114,18 @@ sqlite.exec(`
     token TEXT NOT NULL UNIQUE,
     expires INTEGER NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS reading_history (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    story_id TEXT NOT NULL,
+    current_scene INTEGER DEFAULT 1,
+    total_scenes INTEGER DEFAULT 1,
+    completed INTEGER DEFAULT 0,
+    category TEXT,
+    animation_style TEXT,
+    last_read_at TEXT DEFAULT (datetime('now')),
+    started_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(user_id, story_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_reading_history_user ON reading_history(user_id, last_read_at);
 `);
