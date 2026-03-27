@@ -3,15 +3,20 @@ import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 import { authConfig } from "./auth.config";
 
-/**
- * Full auth config with all providers.
- * Uses JWT-only strategy — no database adapter needed.
- * User data is stored in the JWT token itself.
- */
 export const { handlers, signIn, signOut, auth } = NextAuth({
   ...authConfig,
   providers: [
-    ...authConfig.providers,
+    Google({
+      clientId: process.env.GOOGLE_CLIENT_ID || "",
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
+      authorization: {
+        params: {
+          prompt: "consent",
+          access_type: "offline",
+          response_type: "code",
+        },
+      },
+    }),
     Credentials({
       name: "Email",
       credentials: {
@@ -27,8 +32,6 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 
         if (!email || !password) return null;
 
-        // For now, any email+password combo works for registration/login
-        // In production, connect to a proper database (Supabase, PlanetScale, etc.)
         return {
           id: email,
           email,

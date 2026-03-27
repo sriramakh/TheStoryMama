@@ -1,21 +1,16 @@
 import type { NextAuthConfig } from "next-auth";
-import Google from "next-auth/providers/google";
 
 /**
- * Edge-compatible auth config — NO database imports.
- * Used by middleware for route protection.
+ * Edge-compatible auth config — NO providers, NO database imports.
+ * Used by middleware for route protection only.
+ * Providers are added in auth.ts (Node.js runtime).
  */
 export const authConfig: NextAuthConfig = {
   session: { strategy: "jwt" },
   pages: {
     signIn: "/auth/signin",
   },
-  providers: [
-    Google({
-      clientId: process.env.GOOGLE_CLIENT_ID!,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-    }),
-  ],
+  providers: [], // Providers defined in auth.ts only
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
