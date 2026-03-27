@@ -239,14 +239,18 @@ class StoryService:
 
     def get_scene_image_path(self, story_id: str, scene_num: int) -> str | None:
         folder = os.path.join(self.stories_dir, story_id)
-        # Serve the optimized JPG first (600KB vs 3MB raw PNG)
-        overlaid_path = os.path.join(folder, f"scene_{scene_num:02d}.jpg")
-        if os.path.exists(overlaid_path):
-            return overlaid_path
-        # Fallback to raw PNG if no JPG exists
+        # 1. Optimized web JPG (no text overlay, ~150-250KB) — best for web reader
+        web_path = os.path.join(folder, f"scene_{scene_num:02d}_web.jpg")
+        if os.path.exists(web_path):
+            return web_path
+        # 2. Fallback to raw PNG (no text overlay, ~2-3MB)
         raw_path = os.path.join(folder, f"scene_{scene_num:02d}_raw.png")
         if os.path.exists(raw_path):
             return raw_path
+        # 3. Last resort: text-overlaid JPG
+        overlaid_path = os.path.join(folder, f"scene_{scene_num:02d}.jpg")
+        if os.path.exists(overlaid_path):
+            return overlaid_path
         return None
 
     def get_pdf_path(self, story_id: str) -> str | None:
