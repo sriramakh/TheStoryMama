@@ -316,24 +316,26 @@ def list_categories():
 
 @router.get("/featured")
 def featured_stories():
-    """Return featured stories for the homepage — diverse categories and styles."""
+    """Return hand-picked featured stories for the homepage."""
     all_stories = _load_all_stories()
-    seen_cats = set()
-    seen_styles = set()
-    featured = []
 
-    # First pass: one per category, different styles
-    for s in all_stories:
-        primary_cat = s.get("category", "")
-        style = s.get("animation_style", "")
-        if primary_cat not in seen_cats and style not in seen_styles and len(featured) < 6:
-            featured.append(s)
-            seen_cats.add(primary_cat)
-            seen_styles.add(style)
+    # Curated list of best stories — update this as new great stories are added
+    FEATURED_IDS = [
+        "118_Puffs_Magical_Bubble_Adventure",
+        "128_Ella_and_the_Magical_Puddle",
+        "132_The_Melodic_Garden",
+        "133_Pandas_Perfect_Roll",
+        "135_The_Butterfly_Dreamers",
+        "137_Ants_on_a_Cupcake_Adventure",
+    ]
 
-    # Fill remaining
-    for s in all_stories:
-        if s not in featured and len(featured) < 6:
-            featured.append(s)
+    story_map = {s["id"]: s for s in all_stories}
+    featured = [story_map[sid] for sid in FEATURED_IDS if sid in story_map]
+
+    # Fill if any curated stories are missing
+    if len(featured) < 6:
+        for s in all_stories:
+            if s not in featured and len(featured) < 6:
+                featured.append(s)
 
     return {"stories": featured}
