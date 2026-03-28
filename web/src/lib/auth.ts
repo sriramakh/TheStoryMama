@@ -7,42 +7,12 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   ...authConfig,
   secret: process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET,
   trustHost: true,
-  cookies: {
-    pkceCodeVerifier: {
-      name: "authjs.pkce.code_verifier",
-      options: {
-        httpOnly: true,
-        sameSite: "lax",
-        path: "/",
-        secure: true,
-        maxAge: 900,
-      },
-    },
-    callbackUrl: {
-      name: "authjs.callback-url",
-      options: {
-        httpOnly: true,
-        sameSite: "lax",
-        path: "/",
-        secure: true,
-      },
-    },
-    csrfToken: {
-      name: "authjs.csrf-token",
-      options: {
-        httpOnly: true,
-        sameSite: "lax",
-        path: "/",
-        secure: true,
-      },
-    },
-  },
   providers: [
     Google({
       clientId: process.env.AUTH_GOOGLE_ID || process.env.GOOGLE_CLIENT_ID || "",
       clientSecret: process.env.AUTH_GOOGLE_SECRET || process.env.GOOGLE_CLIENT_SECRET || "",
-      // Allow sign-in without linking to a database account
       allowDangerousEmailAccountLinking: true,
+      checks: ["state"], // Disable PKCE, use state only — fixes Vercel serverless cookie issue
     }),
     Credentials({
       name: "Email",
@@ -70,14 +40,12 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   callbacks: {
     ...authConfig.callbacks,
     async jwt({ token, user, account, profile }) {
-      // On initial sign-in, populate token with user data
       if (user) {
         token.id = user.id;
         token.name = user.name;
         token.email = user.email;
         token.picture = user.image;
       }
-      // For Google OAuth, use Google profile data
       if (account?.provider === "google" && profile) {
         token.id = profile.sub;
         token.name = profile.name;
