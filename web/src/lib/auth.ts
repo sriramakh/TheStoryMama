@@ -12,7 +12,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       clientId: process.env.AUTH_GOOGLE_ID || process.env.GOOGLE_CLIENT_ID || "",
       clientSecret: process.env.AUTH_GOOGLE_SECRET || process.env.GOOGLE_CLIENT_SECRET || "",
       allowDangerousEmailAccountLinking: true,
-      checks: ["state"], // Disable PKCE, use state only — fixes Vercel serverless cookie issue
+      checks: ["none"], // Disable all checks — Vercel serverless can't persist cookies between function calls
     }),
     Credentials({
       name: "Email",
