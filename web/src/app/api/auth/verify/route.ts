@@ -28,11 +28,17 @@ export async function GET(req: NextRequest) {
   } as Parameters<typeof encode>[0]);
 
   // Set the session cookie and redirect to home
+  // Use __Secure- prefix for HTTPS (what NextAuth v5 expects on production)
+  const isSecure = req.url.startsWith("https");
+  const cookieName = isSecure
+    ? "__Secure-authjs.session-token"
+    : "authjs.session-token";
+
   const response = NextResponse.redirect(new URL("/", req.url));
 
-  response.cookies.set("authjs.session-token", sessionToken, {
+  response.cookies.set(cookieName, sessionToken, {
     httpOnly: true,
-    secure: true,
+    secure: isSecure,
     sameSite: "lax",
     path: "/",
     maxAge: 30 * 24 * 60 * 60,
