@@ -2,14 +2,14 @@
 
 import { useState, Suspense } from "react";
 import { signIn } from "next-auth/react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
-import { Loader2 } from "lucide-react";
+import { Loader2, Mail, CheckCircle } from "lucide-react";
 
 export default function SignInPage() {
   return (
@@ -20,41 +20,81 @@ export default function SignInPage() {
 }
 
 function SignInForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl") || "/";
+  const errorParam = searchParams.get("error");
 
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState(
+    errorParam === "invalid-token" ? "This link has expired. Please try again." :
+    errorParam === "missing-token" ? "Invalid sign-in link." : ""
+  );
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [emailSent, setEmailSent] = useState(false);
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleEmailSignIn(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     setLoading(true);
 
-    const result = await signIn("credentials", {
-      email,
-      password,
-      action: "login",
-      redirect: false,
-    });
+    try {
+      const res = await fetch("/api/auth/magic-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || "Something went wrong. Please try again.");
+      } else {
+        setEmailSent(true);
+      }
+    } catch {
+      setError("Something went wrong. Please try again.");
+    }
 
     setLoading(false);
-
-    if (result?.error) {
-      setError("Invalid email or password. Please try again.");
-    } else {
-      router.push(callbackUrl);
-      router.refresh();
-    }
   }
 
   async function handleGoogle() {
     setGoogleLoading(true);
     await signIn("google", { callbackUrl });
+  }
+
+  if (emailSent) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-[var(--color-pastel-lavender)]/20 to-[var(--color-pastel-cream)]/50 px-4 py-12">
+        <Card className="w-full max-w-md border-0 shadow-lg">
+          <CardContent className="p-8 text-center">
+            <div className="h-16 w-16 rounded-full bg-[var(--color-pastel-mint)] flex items-center justify-center mx-auto mb-4">
+              <CheckCircle className="h-8 w-8 text-emerald-600" />
+            </div>
+            <h1 className="text-2xl font-bold text-[var(--color-warm-brown)] font-[family-name:var(--font-quicksand)] mb-2">
+              Check your email!
+            </h1>
+            <p className="text-muted-foreground mb-2">
+              We sent a sign-in link to
+            </p>
+            <p className="font-semibold text-[var(--color-warm-brown)] mb-4">
+              {email}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Click the link in the email to sign in. The link expires in 15 minutes.
+            </p>
+            <Button
+              variant="ghost"
+              className="mt-6 text-sm"
+              onClick={() => setEmailSent(false)}
+            >
+              Use a different email
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
 
   return (
@@ -71,10 +111,10 @@ function SignInForm() {
               className="rounded-xl mx-auto mb-3"
             />
             <h1 className="text-2xl font-bold text-[var(--color-warm-brown)] font-[family-name:var(--font-quicksand)]">
-              Welcome Back
+              Welcome to TheStoryMama
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Sign in to continue creating stories
+              Sign in to create stories for your little one
             </p>
           </div>
 
@@ -111,8 +151,8 @@ function SignInForm() {
             </div>
           )}
 
-          {/* Email form */}
-          <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Magic link email form */}
+          <form onSubmit={handleEmailSignIn} className="space-y-4">
             <div>
               <label className="text-sm font-medium text-foreground">
                 Email
@@ -126,40 +166,24 @@ function SignInForm() {
                 required
               />
             </div>
-            <div>
-              <label className="text-sm font-medium text-foreground">
-                Password
-              </label>
-              <Input
-                type="password"
-                placeholder="Your password"
-                className="mt-1.5 rounded-xl"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-            </div>
             <Button
               type="submit"
               disabled={loading}
-              className="w-full rounded-xl py-5 text-base bg-[var(--color-pastel-pink)] text-[var(--color-warm-brown)] hover:bg-[var(--color-pastel-rose)]"
+              className="w-full rounded-xl py-5 text-base bg-[var(--color-pastel-pink)] text-[var(--color-warm-brown)] hover:bg-[var(--color-pastel-rose)] gap-2"
             >
               {loading ? (
                 <Loader2 className="h-5 w-5 animate-spin" />
               ) : (
-                "Sign In"
+                <>
+                  <Mail className="h-5 w-5" />
+                  Send Sign-In Link
+                </>
               )}
             </Button>
           </form>
 
-          <p className="text-sm text-center text-muted-foreground mt-6">
-            Don&apos;t have an account?{" "}
-            <Link
-              href="/auth/signup"
-              className="text-primary font-medium hover:underline"
-            >
-              Sign up
-            </Link>
+          <p className="text-xs text-center text-muted-foreground mt-6">
+            No password needed — we&apos;ll email you a secure sign-in link.
           </p>
         </CardContent>
       </Card>

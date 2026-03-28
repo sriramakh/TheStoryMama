@@ -2,61 +2,84 @@
 
 import { useState } from "react";
 import { signIn } from "next-auth/react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
-import { Loader2 } from "lucide-react";
+import { Loader2, Mail, CheckCircle } from "lucide-react";
 
 export default function SignUpPage() {
-  const router = useRouter();
-
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [emailSent, setEmailSent] = useState(false);
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleEmailSignUp(e: React.FormEvent) {
     e.preventDefault();
     setError("");
-
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters.");
-      return;
-    }
-
     setLoading(true);
 
-    const result = await signIn("credentials", {
-      email,
-      password,
-      name,
-      action: "register",
-      redirect: false,
-    });
+    try {
+      const res = await fetch("/api/auth/magic-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, name }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || "Something went wrong. Please try again.");
+      } else {
+        setEmailSent(true);
+      }
+    } catch {
+      setError("Something went wrong. Please try again.");
+    }
 
     setLoading(false);
-
-    if (result?.error) {
-      if (result.error.includes("already registered")) {
-        setError("This email is already registered. Try signing in instead.");
-      } else {
-        setError("Something went wrong. Please try again.");
-      }
-    } else {
-      router.push("/");
-      router.refresh();
-    }
   }
 
   async function handleGoogle() {
     setGoogleLoading(true);
     await signIn("google", { callbackUrl: "/" });
+  }
+
+  if (emailSent) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-[var(--color-pastel-pink)]/20 to-[var(--color-pastel-cream)]/50 px-4 py-12">
+        <Card className="w-full max-w-md border-0 shadow-lg">
+          <CardContent className="p-8 text-center">
+            <div className="h-16 w-16 rounded-full bg-[var(--color-pastel-mint)] flex items-center justify-center mx-auto mb-4">
+              <CheckCircle className="h-8 w-8 text-emerald-600" />
+            </div>
+            <h1 className="text-2xl font-bold text-[var(--color-warm-brown)] font-[family-name:var(--font-quicksand)] mb-2">
+              Check your email!
+            </h1>
+            <p className="text-muted-foreground mb-2">
+              We sent a sign-in link to
+            </p>
+            <p className="font-semibold text-[var(--color-warm-brown)] mb-4">
+              {email}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Click the link in the email to complete your sign-up. The link expires in 15 minutes.
+            </p>
+            <Button
+              variant="ghost"
+              className="mt-6 text-sm"
+              onClick={() => setEmailSent(false)}
+            >
+              Use a different email
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
 
   return (
@@ -113,8 +136,8 @@ export default function SignUpPage() {
             </div>
           )}
 
-          {/* Email form */}
-          <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Magic link sign-up form */}
+          <form onSubmit={handleEmailSignUp} className="space-y-4">
             <div>
               <label className="text-sm font-medium text-foreground">
                 Name
@@ -141,34 +164,27 @@ export default function SignUpPage() {
                 required
               />
             </div>
-            <div>
-              <label className="text-sm font-medium text-foreground">
-                Password
-              </label>
-              <Input
-                type="password"
-                placeholder="At least 6 characters"
-                className="mt-1.5 rounded-xl"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                minLength={6}
-              />
-            </div>
             <Button
               type="submit"
               disabled={loading}
-              className="w-full rounded-xl py-5 text-base bg-[var(--color-pastel-pink)] text-[var(--color-warm-brown)] hover:bg-[var(--color-pastel-rose)]"
+              className="w-full rounded-xl py-5 text-base bg-[var(--color-pastel-pink)] text-[var(--color-warm-brown)] hover:bg-[var(--color-pastel-rose)] gap-2"
             >
               {loading ? (
                 <Loader2 className="h-5 w-5 animate-spin" />
               ) : (
-                "Create Account"
+                <>
+                  <Mail className="h-5 w-5" />
+                  Send Sign-Up Link
+                </>
               )}
             </Button>
           </form>
 
-          <p className="text-sm text-center text-muted-foreground mt-6">
+          <p className="text-xs text-center text-muted-foreground mt-6">
+            No password needed — we&apos;ll email you a secure link.
+          </p>
+
+          <p className="text-sm text-center text-muted-foreground mt-4">
             Already have an account?{" "}
             <Link
               href="/auth/signin"
