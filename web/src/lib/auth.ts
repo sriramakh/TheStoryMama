@@ -9,10 +9,29 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   trustHost: true,
   cookies: {
     pkceCodeVerifier: {
-      name: "next-auth.pkce.code_verifier",
+      name: "authjs.pkce.code_verifier",
       options: {
         httpOnly: true,
-        sameSite: "none",
+        sameSite: "lax",
+        path: "/",
+        secure: true,
+        maxAge: 900,
+      },
+    },
+    callbackUrl: {
+      name: "authjs.callback-url",
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: true,
+      },
+    },
+    csrfToken: {
+      name: "authjs.csrf-token",
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
         path: "/",
         secure: true,
       },
