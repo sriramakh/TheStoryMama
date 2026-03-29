@@ -81,15 +81,52 @@ async def fastspring_webhook(request: Request):
 
 def _handle_order_completed(data: dict):
     """Grant credits when a one-time order completes."""
-    email = data.get("account", {}).get("contact", {}).get("email", "")
+    logger.info(f"Order data keys: {list(data.keys())}")
+
+    # FastSpring sends email in various places depending on event type
+    email = ""
+    # Try nested account.contact.email
+    account = data.get("account", {})
+    if isinstance(account, dict):
+        contact = account.get("contact", {})
+        if isinstance(contact, dict):
+            email = contact.get("email", "")
+        email = email or account.get("email", "")
+
+    # Try top-level recipient/customer
     if not email:
-        email = data.get("customer", {}).get("email", "")
+        recipient = data.get("recipient", {})
+        if isinstance(recipient, dict):
+            email = recipient.get("email", "")
+    if not email:
+        customer = data.get("customer", {})
+        if isinstance(customer, dict):
+            email = customer.get("email", "")
+    if not email:
+        # Try tags or reference
+        tags = data.get("tags", {})
+        if isinstance(tags, dict):
+            email = tags.get("email", "")
+
+    logger.info(f"Extracted email: {email}")
 
     items = data.get("items", [])
-    order_id = data.get("id", "")
+    if not isinstance(items, list):
+        items = []
+    order_id = data.get("id", data.get("reference", ""))
 
     for item in items:
+        # FastSpring may use "product" as string or nested object
         product_path = item.get("product", "")
+        if isinstance(product_path, dict):
+            product_path = product_path.get("path", "") or product_path.get("product", "")
+
+        # Also check "productPath" or "path"
+        if not product_path:
+            product_path = item.get("productPath", "") or item.get("path", "")
+
+        logger.info(f"Item product_path: {product_path}, item keys: {list(item.keys())}")
+
         product_config = PRODUCT_CREDITS.get(product_path)
 
         if not product_config:
@@ -97,6 +134,9 @@ def _handle_order_completed(data: dict):
             continue
 
         credits = product_config["credits"]
+
+        if not email:
+            email = "unknown@email.com"
 
         if email not in user_credits:
             user_credits[email] = {"credits": 0, "orders": []}
