@@ -335,13 +335,20 @@ def api_generate_reel(req: ReelRequest):
 
     total_vid = cum + all_segments[-1]["dur"]
 
-    video_only = os.path.join(REELS_DIR, f"tmp_v_{uuid.uuid4().hex[:8]}.mp4")
-    r_vid = subprocess.run(["ffmpeg", "-y", *inputs_v, "-filter_complex", ";".join(vf),
-                    "-map", "[vout]", "-c:v", "libx264", "-preset", "fast", "-crf", "23",
-                    "-pix_fmt", "yuv420p", "-t", str(total_vid), "-an", video_only],
-                   capture_output=True, text=True)
-    if r_vid.returncode != 0:
-        raise HTTPException(500, f"Video generation failed: {r_vid.stderr[-300:]}")
+    # Cache video track — same for all BGM/volume combos of this story+voice+intro+outro combo
+    intro_flag = "i" if (intro_vid and os.path.exists(intro_vid)) else "n"
+    outro_flag = "o" if (outro_vid and os.path.exists(outro_vid)) else "n"
+    video_cache_key = f"{req.story_id}_{req.voice}_{intro_flag}{outro_flag}"
+    video_only = os.path.join(REELS_DIR, f"vcache_{video_cache_key}.mp4")
+
+    if not os.path.exists(video_only):
+        r_vid = subprocess.run(["ffmpeg", "-y", *inputs_v, "-filter_complex", ";".join(vf),
+                        "-map", "[vout]", "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                        "-pix_fmt", "yuv420p", "-t", str(total_vid), "-an", video_only],
+                       capture_output=True, text=True)
+        if r_vid.returncode != 0:
+            raise HTTPException(500, f"Video generation failed: {r_vid.stderr[-300:]}")
+    # else: reuse cached video track
 
     # BUILD AUDIO
     inputs_a = []
