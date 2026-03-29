@@ -12,6 +12,7 @@ import textwrap
 import shutil
 import uuid
 import time
+import threading
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -21,6 +22,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from openai import OpenAI
 from PIL import Image, ImageDraw, ImageFont
+
+# Job progress tracking
+jobs: dict[str, dict] = {}  # job_id -> {status, progress, message, result}
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
@@ -238,20 +242,50 @@ def tts_status(story_id: str):
     return result
 
 
+@app.get("/api/job/{job_id}")
+def get_job_status(job_id: str):
+    """Get the status of a reel generation job."""
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    return job
+
+
 @app.post("/api/generate-reel")
 def api_generate_reel(req: ReelRequest):
-    """Generate a reel with specified settings."""
+    """Start reel generation in background, return job_id for polling."""
     story_path = os.path.join(STORIES_DIR, req.story_id, "story_data.json")
     if not os.path.exists(story_path):
         raise HTTPException(404, "Story not found")
 
+    job_id = uuid.uuid4().hex[:10]
+    jobs[job_id] = {"status": "running", "progress": 0, "message": "Starting...", "result": None}
+
+    def run_job():
+        try:
+            _generate_reel_impl(req, job_id)
+        except Exception as e:
+            jobs[job_id] = {"status": "failed", "progress": 0, "message": str(e), "result": None}
+
+    thread = threading.Thread(target=run_job, daemon=True)
+    thread.start()
+
+    return {"job_id": job_id}
+
+
+def _generate_reel_impl(req: ReelRequest, job_id: str):
+    """Actual reel generation with progress updates."""
+    story_path = os.path.join(STORIES_DIR, req.story_id, "story_data.json")
     with open(story_path) as f:
         story = json.load(f)
 
-    # Ensure TTS exists
+    # Step 1: TTS
+    jobs[job_id] = {"status": "running", "progress": 10, "message": "Generating narration...", "result": None}
     tts_dir = os.path.join(TTS_CACHE_DIR, req.story_id, req.voice)
-    if not os.path.exists(tts_dir) or len(os.listdir(tts_dir)) < len(story["scenes"]):
+    if not os.path.exists(tts_dir) or len([f for f in os.listdir(tts_dir) if f.endswith(".mp3")]) < len(story["scenes"]):
         generate_tts(req.story_id, req.voice)
+    jobs[job_id]["progress"] = 30
+    jobs[job_id]["message"] = "Narration ready"
 
     bgm_path = BGM_TRACKS.get(req.bgm)
     if not bgm_path or not os.path.exists(bgm_path):
@@ -339,6 +373,7 @@ def api_generate_reel(req: ReelRequest):
     intro_flag = "i" if (intro_vid and os.path.exists(intro_vid)) else "n"
     outro_flag = "o" if (outro_vid and os.path.exists(outro_vid)) else "n"
     video_cache_key = f"{req.story_id}_{req.voice}_{intro_flag}{outro_flag}"
+    jobs[job_id] = {"status": "running", "progress": 40, "message": "Building video track...", "result": None}
     video_only = os.path.join(REELS_DIR, f"vcache_{video_cache_key}.mp4")
 
     if not os.path.exists(video_only):
@@ -347,7 +382,10 @@ def api_generate_reel(req: ReelRequest):
                         "-pix_fmt", "yuv420p", "-t", str(total_vid), "-an", video_only],
                        capture_output=True, text=True)
         if r_vid.returncode != 0:
-            raise HTTPException(500, f"Video generation failed: {r_vid.stderr[-300:]}")
+            raise Exception(f"Video generation failed: {r_vid.stderr[-300:]}")
+    else:
+        jobs[job_id]["progress"] = 60
+        jobs[job_id]["message"] = "Using cached video track"
     # else: reuse cached video track
 
     # BUILD AUDIO
@@ -369,37 +407,43 @@ def api_generate_reel(req: ReelRequest):
     af.append(f"[tts_mix][bgm_a]amix=inputs=2:duration=first:normalize=0,"
               f"aformat=channel_layouts=stereo[aout]")
 
+    jobs[job_id] = {"status": "running", "progress": 65, "message": "Mixing audio...", "result": None}
     audio_only = os.path.join(REELS_DIR, f"tmp_a_{uuid.uuid4().hex[:8]}.m4a")
     r_aud = subprocess.run(["ffmpeg", "-y", *inputs_a, "-filter_complex", ";".join(af),
                     "-map", "[aout]", "-c:a", "aac", "-b:a", "192k", audio_only],
                    capture_output=True, text=True)
     if r_aud.returncode != 0:
-        if os.path.exists(video_only):
+        if os.path.exists(video_only) and "vcache_" not in video_only:
             os.remove(video_only)
-        raise HTTPException(500, f"Audio generation failed: {r_aud.stderr[-300:]}")
+        raise Exception(f"Audio generation failed: {r_aud.stderr[-300:]}")
 
     # MUX
+    jobs[job_id] = {"status": "running", "progress": 85, "message": "Combining video + audio...", "result": None}
     reel_id = f"{req.story_id}_{req.voice}_{req.bgm}_{uuid.uuid4().hex[:6]}"
     out = os.path.join(REELS_DIR, f"{reel_id}.mp4")
     subprocess.run(["ffmpeg", "-y", "-i", video_only, "-i", audio_only,
                     "-c:v", "copy", "-c:a", "copy", "-movflags", "+faststart",
                     "-t", str(total_vid), out], capture_output=True)
 
-    # Cleanup
-    for f in [video_only, audio_only]:
-        if os.path.exists(f):
-            os.remove(f)
+    # Cleanup (keep video cache, remove temp audio)
+    if os.path.exists(audio_only):
+        os.remove(audio_only)
 
     if os.path.exists(out):
         mb = os.path.getsize(out) / (1024 * 1024)
-        return {
-            "url": f"/reels/{reel_id}.mp4",
-            "filename": f"{reel_id}.mp4",
-            "size_mb": round(mb, 1),
-            "duration": round(total_vid, 1),
+        jobs[job_id] = {
+            "status": "done",
+            "progress": 100,
+            "message": "Reel ready!",
+            "result": {
+                "url": f"/reels/{reel_id}.mp4",
+                "filename": f"{reel_id}.mp4",
+                "size_mb": round(mb, 1),
+                "duration": round(total_vid, 1),
+            },
         }
     else:
-        raise HTTPException(500, "Failed to generate reel")
+        raise Exception("Failed to generate reel")
 
 
 # ── Frontend ─────────────────────────────────────────────────────────────────
@@ -532,6 +576,16 @@ h1 { color: #654321; margin-bottom: 8px; }
       <a id="downloadLink" style="display:none;"><button class="btn btn-download">Download</button></a>
     </div>
 
+    <div id="progressContainer" style="display:none; margin-top:16px;">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+        <span id="progressText" style="font-size:13px; color:#8B7D6B;">Starting...</span>
+        <span id="progressPct" style="font-size:13px; font-weight:600; color:#654321;">0%</span>
+      </div>
+      <div style="height:8px; background:#EDE5D8; border-radius:4px; overflow:hidden;">
+        <div id="progressBar" style="height:100%; width:0%; background:linear-gradient(to right,#FFD6E0,#E8D5F5); border-radius:4px; transition:width 0.3s;"></div>
+      </div>
+    </div>
+
     <div id="status"></div>
 
     <div class="preview-area" id="previewArea" style="display:none;">
@@ -631,9 +685,14 @@ function generateReel() {
   const btn = document.getElementById('generateBtn');
   btn.disabled = true;
   btn.textContent = 'Generating...';
-  setStatus('Generating reel... This takes 1-2 minutes.', 'loading');
   document.getElementById('downloadLink').style.display = 'none';
   document.getElementById('previewArea').style.display = 'none';
+  document.getElementById('status').innerHTML = '';
+
+  // Show progress bar
+  const pc = document.getElementById('progressContainer');
+  pc.style.display = 'block';
+  updateProgress(0, 'Starting...');
 
   const body = {
     story_id: selectedStory.id,
@@ -652,24 +711,58 @@ function generateReel() {
   })
   .then(r => r.json())
   .then(data => {
-    if (data.url) {
-      setStatus('Reel ready! ' + data.size_mb + ' MB, ' + data.duration + 's', 'success');
-      const player = document.getElementById('videoPlayer');
-      player.src = data.url;
-      document.getElementById('previewArea').style.display = 'block';
-      const dl = document.getElementById('downloadLink');
-      dl.href = data.url;
-      dl.download = data.filename;
-      dl.style.display = 'inline';
+    if (data.job_id) {
+      pollJob(data.job_id);
     } else {
-      setStatus('Generation failed: ' + (data.detail || 'Unknown error'), 'error');
+      setStatus('Failed to start: ' + (data.detail || 'Unknown error'), 'error');
+      btn.disabled = false;
+      btn.textContent = 'Generate Reel';
+      pc.style.display = 'none';
     }
   })
-  .catch(e => setStatus('Error: ' + e.message, 'error'))
-  .finally(() => {
+  .catch(e => {
+    setStatus('Error: ' + e.message, 'error');
     btn.disabled = false;
     btn.textContent = 'Generate Reel';
+    pc.style.display = 'none';
   });
+}
+
+function updateProgress(pct, msg) {
+  document.getElementById('progressBar').style.width = pct + '%';
+  document.getElementById('progressPct').textContent = pct + '%';
+  document.getElementById('progressText').textContent = msg;
+}
+
+function pollJob(jobId) {
+  fetch('/api/job/' + jobId)
+    .then(r => r.json())
+    .then(data => {
+      updateProgress(data.progress, data.message);
+
+      if (data.status === 'done' && data.result) {
+        setStatus('Reel ready! ' + data.result.size_mb + ' MB, ' + data.result.duration + 's', 'success');
+        const player = document.getElementById('videoPlayer');
+        player.src = data.result.url;
+        document.getElementById('previewArea').style.display = 'block';
+        const dl = document.getElementById('downloadLink');
+        dl.href = data.result.url;
+        dl.download = data.result.filename;
+        dl.style.display = 'inline';
+        document.getElementById('generateBtn').disabled = false;
+        document.getElementById('generateBtn').textContent = 'Generate Reel';
+        setTimeout(() => { document.getElementById('progressContainer').style.display = 'none'; }, 2000);
+      } else if (data.status === 'failed') {
+        setStatus('Failed: ' + data.message, 'error');
+        document.getElementById('generateBtn').disabled = false;
+        document.getElementById('generateBtn').textContent = 'Generate Reel';
+        document.getElementById('progressContainer').style.display = 'none';
+      } else {
+        // Still running — poll again in 1.5s
+        setTimeout(() => pollJob(jobId), 1500);
+      }
+    })
+    .catch(() => setTimeout(() => pollJob(jobId), 2000));
 }
 </script>
 </body>
