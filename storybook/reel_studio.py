@@ -461,7 +461,7 @@ def frontend():
 body { font-family: 'Nunito', Arial, sans-serif; background: #FFF9EB; color: #4A3728; padding: 20px; max-width: 1200px; margin: 0 auto; }
 h1 { color: #654321; margin-bottom: 8px; }
 .subtitle { color: #8B7D6B; margin-bottom: 24px; }
-.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; min-width: 0; }
 @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
 
 .panel { background: white; border-radius: 16px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
@@ -508,9 +508,10 @@ h1 { color: #654321; margin-bottom: 8px; }
 .tts-status { font-size: 12px; color: #8B7D6B; margin-top: 6px; }
 .tts-status .ready { color: #2D5F4A; }
 
-.scene-preview { display: flex; gap: 6px; overflow-x: auto; padding: 10px 0; }
-.scene-preview img { height: 180px; border-radius: 8px; flex-shrink: 0; cursor: pointer; transition: transform 0.15s; }
+.scene-preview { display: flex; gap: 8px; overflow-x: auto; padding: 10px 0; max-width: 100%; }
+.scene-preview img { height: 160px; border-radius: 8px; flex-shrink: 0; cursor: pointer; transition: transform 0.15s; }
 .scene-preview img:hover { transform: scale(1.05); }
+.panel { min-width: 0; overflow: hidden; }
 </style>
 </head>
 <body>
