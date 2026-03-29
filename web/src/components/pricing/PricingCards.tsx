@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -8,47 +7,14 @@ import { Badge } from "@/components/ui/badge";
 import { Check, Sparkles, Crown } from "lucide-react";
 import { PRICING_PLANS, FASTSPRING_STOREFRONT } from "@/lib/constants";
 
-// FastSpring product path mapping
 const PLAN_TO_PRODUCT: Record<string, string> = {
   pack_5: "story-pack-5",
   monthly_10: "monthly-10",
   yearly_15: "annual-15",
 };
 
-declare global {
-  interface Window {
-    fastspring?: {
-      builder: {
-        push: (config: Record<string, unknown>) => void;
-        checkout: (productPath: string) => void;
-        recognize: (data: Record<string, string>) => void;
-      };
-    };
-  }
-}
-
 export function PricingCards() {
   const { data: session } = useSession();
-
-  // Load FastSpring SBL script
-  useEffect(() => {
-    if (document.getElementById("fsc-api")) return;
-
-    const script = document.createElement("script");
-    script.id = "fsc-api";
-    script.src = `https://sbl.onfastspring.com/sbl/1.0.3/fastspring-builder.min.js`;
-    script.type = "text/javascript";
-    script.dataset.storefront = FASTSPRING_STOREFRONT;
-    script.dataset.accessKey = ""; // SBL doesn't need access key for popup
-    script.dataset.dataPopupWebhookReceived = "onFSPopupClosed";
-    document.head.appendChild(script);
-
-    // Callback when purchase completes
-    (window as unknown as Record<string, unknown>).onFSPopupClosed = function (data: unknown) {
-      // Redirect to dashboard after purchase
-      window.location.href = "/dashboard?purchased=true";
-    };
-  }, []);
 
   function handlePurchase(planId: string) {
     const productPath = PLAN_TO_PRODUCT[planId];
@@ -59,26 +25,9 @@ export function PricingCards() {
       return;
     }
 
-    // Pass user email to FastSpring for receipt
-    if (window.fastspring?.builder && session.user.email) {
-      window.fastspring.builder.recognize({
-        email: session.user.email,
-      });
-    }
-
-    // Open FastSpring popup checkout
-    if (window.fastspring?.builder) {
-      window.fastspring.builder.push({
-        products: [{ path: productPath, quantity: 1 }],
-        checkout: true,
-      });
-    } else {
-      // Fallback: redirect to storefront
-      window.open(
-        `https://${FASTSPRING_STOREFRONT}/${productPath}`,
-        "_blank"
-      );
-    }
+    // Direct link to FastSpring checkout with email pre-filled
+    const email = encodeURIComponent(session.user.email || "");
+    window.location.href = `https://${FASTSPRING_STOREFRONT}/checkout?product_1_path=${productPath}&contact_email=${email}`;
   }
 
   return (
