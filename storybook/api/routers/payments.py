@@ -26,6 +26,48 @@ PRODUCT_CREDITS = {
 user_credits: dict[str, dict] = {}
 
 
+def _extract_email(data: dict) -> str:
+    """Extract email from FastSpring event data — handles various payload structures."""
+    # Try nested paths
+    for path in [
+        ["account", "contact", "email"],
+        ["account", "email"],
+        ["recipient", "email"],
+        ["customer", "email"],
+        ["tags", "email"],
+    ]:
+        val = data
+        for key in path:
+            if isinstance(val, dict):
+                val = val.get(key, {})
+            else:
+                val = {}
+                break
+        if isinstance(val, str) and "@" in val:
+            return val
+
+    # Try top-level email
+    if isinstance(data.get("email"), str):
+        return data["email"]
+
+    # Search all string values for email-like patterns
+    for key, val in data.items():
+        if isinstance(val, str) and "@" in val and "." in val:
+            return val
+
+    return ""
+
+
+def _extract_product_path(item: dict) -> str:
+    """Extract product path from a FastSpring order item."""
+    product = item.get("product", "")
+    if isinstance(product, dict):
+        return product.get("path", "") or product.get("product", "")
+    if isinstance(product, str):
+        return product
+    return item.get("productPath", "") or item.get("path", "")
+
+
 def verify_webhook_signature(payload: bytes, signature: str) -> bool:
     """Verify FastSpring webhook HMAC-SHA256 signature."""
     secret = Config.FASTSPRING_WEBHOOK_SECRET
@@ -83,31 +125,7 @@ def _handle_order_completed(data: dict):
     """Grant credits when a one-time order completes."""
     logger.info(f"Order data keys: {list(data.keys())}")
 
-    # FastSpring sends email in various places depending on event type
-    email = ""
-    # Try nested account.contact.email
-    account = data.get("account", {})
-    if isinstance(account, dict):
-        contact = account.get("contact", {})
-        if isinstance(contact, dict):
-            email = contact.get("email", "")
-        email = email or account.get("email", "")
-
-    # Try top-level recipient/customer
-    if not email:
-        recipient = data.get("recipient", {})
-        if isinstance(recipient, dict):
-            email = recipient.get("email", "")
-    if not email:
-        customer = data.get("customer", {})
-        if isinstance(customer, dict):
-            email = customer.get("email", "")
-    if not email:
-        # Try tags or reference
-        tags = data.get("tags", {})
-        if isinstance(tags, dict):
-            email = tags.get("email", "")
-
+    email = _extract_email(data)
     logger.info(f"Extracted email: {email}")
 
     items = data.get("items", [])
@@ -116,15 +134,7 @@ def _handle_order_completed(data: dict):
     order_id = data.get("id", data.get("reference", ""))
 
     for item in items:
-        # FastSpring may use "product" as string or nested object
-        product_path = item.get("product", "")
-        if isinstance(product_path, dict):
-            product_path = product_path.get("path", "") or product_path.get("product", "")
-
-        # Also check "productPath" or "path"
-        if not product_path:
-            product_path = item.get("productPath", "") or item.get("path", "")
-
+        product_path = _extract_product_path(item)
         logger.info(f"Item product_path: {product_path}, item keys: {list(item.keys())}")
 
         product_config = PRODUCT_CREDITS.get(product_path)
@@ -155,27 +165,34 @@ def _handle_order_completed(data: dict):
 
 def _handle_subscription_activated(data: dict):
     """Grant credits when a subscription starts."""
-    email = data.get("account", {}).get("contact", {}).get("email", "")
+    logger.info(f"Subscription data keys: {list(data.keys())}")
+
+    email = _extract_email(data)
     if not email:
-        return
+        logger.warning("No email found in subscription event")
 
-    product_path = data.get("product", {}).get("product", "")
-    product_config = PRODUCT_CREDITS.get(product_path)
+    # Try various product path locations
+    product_path = ""
+    product = data.get("product", "")
+    if isinstance(product, dict):
+        product_path = product.get("path", "") or product.get("product", "")
+    elif isinstance(product, str):
+        product_path = product
 
-    if not product_config:
-        # Try extracting from instructions or items
-        for key in ["instructions", "items"]:
+    if not product_path:
+        # Try items/instructions
+        for key in ["items", "instructions"]:
             items = data.get(key, [])
             if isinstance(items, list):
                 for item in items:
-                    pp = item.get("product", "")
+                    pp = _extract_product_path(item)
                     if pp in PRODUCT_CREDITS:
-                        product_config = PRODUCT_CREDITS[pp]
                         product_path = pp
                         break
 
+    product_config = PRODUCT_CREDITS.get(product_path)
     if not product_config:
-        logger.warning(f"Unknown subscription product for {email}")
+        logger.warning(f"Unknown subscription product: {product_path} for {email}")
         return
 
     credits = product_config["credits"]
@@ -198,18 +215,24 @@ def _handle_subscription_activated(data: dict):
 
 def _handle_subscription_deactivated(data: dict):
     """Handle subscription cancellation."""
-    email = data.get("account", {}).get("contact", {}).get("email", "")
+    email = _extract_email(data)
     sub_id = data.get("id", "")
     logger.info(f"Subscription deactivated for {email} (sub: {sub_id})")
 
 
 def _handle_subscription_renewed(data: dict):
     """Grant credits on subscription renewal."""
-    email = data.get("account", {}).get("contact", {}).get("email", "")
+    email = _extract_email(data)
     if not email:
         return
 
-    product_path = data.get("product", {}).get("product", "")
+    product = data.get("product", "")
+    product_path = ""
+    if isinstance(product, dict):
+        product_path = product.get("path", "") or product.get("product", "")
+    elif isinstance(product, str):
+        product_path = product
+
     product_config = PRODUCT_CREDITS.get(product_path)
 
     if not product_config:
