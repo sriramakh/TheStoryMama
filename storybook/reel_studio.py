@@ -295,55 +295,53 @@ def api_generate_reel(req: ReelRequest):
                             "-an", outro_vid], capture_output=True)
             outro_dur = get_dur(outro_vid)
 
-    # BUILD VIDEO
+    # BUILD VIDEO — simple linear xfade chain: [intro] + scenes + [outro]
+    # Collect all visual segments in order
+    all_segments = []  # list of {"dur": float, "input_args": list}
+
     inputs_v = []
-    vi = 0
     if intro_vid and os.path.exists(intro_vid):
         inputs_v.extend(["-i", intro_vid])
-        vi += 1
+        all_segments.append({"dur": intro_dur})
+
     for sd in sdata:
         inputs_v.extend(["-loop", "1", "-t", str(sd["dur"]), "-i", sd["img"]])
+        all_segments.append({"dur": sd["dur"]})
+
     if outro_vid and os.path.exists(outro_vid):
         inputs_v.extend(["-i", outro_vid])
+        all_segments.append({"dur": outro_dur})
 
-    total_inputs = (1 if intro_vid else 0) + n + (1 if outro_vid else 0)
+    total_segs = len(all_segments)
     vf = []
-    for i in range(total_inputs):
+
+    # Scale all inputs
+    for i in range(total_segs):
         vf.append(f"[{i}:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,fps=30[v{i}]")
 
     # Xfade chain
-    first_scene_idx = 1 if intro_vid else 0
-    if intro_vid:
-        offset = intro_dur - tr
-        vf.append(f"[v0][v{first_scene_idx}]xfade=transition=slideleft:duration={tr}:offset={offset:.3f}[xf1]")
-        cum = offset + sdata[0]["dur"] - tr
-    else:
-        offset = sdata[0]["dur"] - tr
-        vf.append(f"[v0][v1]xfade=transition=slideleft:duration={tr}:offset={offset:.3f}[xf1]")
-        cum = offset + sdata[1]["dur"] - tr if n > 1 else offset
+    offset = all_segments[0]["dur"] - tr
+    vf.append(f"[v0][v1]xfade=transition=slideleft:duration={tr}:offset={offset:.3f}[xf1]")
+    cum = offset + all_segments[1]["dur"] - tr
 
-    start_i = 1 if intro_vid else 1
-    for i in range(start_i, n - (0 if intro_vid else 1)):
-        scene_vi = first_scene_idx + i + (0 if intro_vid else 1)
-        prev = f"xf{i + (1 if intro_vid else 0)}"
-        curr_label = f"xf{i + 1 + (1 if intro_vid else 0)}"
-        vf.append(f"[{prev}][v{scene_vi}]xfade=transition=slideleft:duration={tr}:offset={cum:.3f}[{curr_label}]")
-        cum += sdata[i + (0 if intro_vid else 1)]["dur"] - tr
+    for i in range(2, total_segs):
+        prev = f"xf{i-1}"
+        curr = f"xf{i}" if i < total_segs - 1 else "vout"
+        vf.append(f"[{prev}][v{i}]xfade=transition=slideleft:duration={tr}:offset={cum:.3f}[{curr}]")
+        cum += all_segments[i]["dur"] - tr
 
-    last_xf = f"xf{n + (1 if intro_vid else 0) - 1}"
-    if outro_vid:
-        outro_vi = total_inputs - 1
-        vf.append(f"[{last_xf}][v{outro_vi}]xfade=transition=slideleft:duration={tr}:offset={cum:.3f}[vout]")
-        total_vid = cum + outro_dur
-    else:
-        vf[-1] = vf[-1].rsplit("[", 1)[0] + "[vout]"
-        total_vid = cum + sdata[-1]["dur"]
+    if total_segs == 2:
+        vf[-1] = vf[-1].replace("[xf1]", "[vout]")
+
+    total_vid = cum + all_segments[-1]["dur"]
 
     video_only = os.path.join(REELS_DIR, f"tmp_v_{uuid.uuid4().hex[:8]}.mp4")
-    subprocess.run(["ffmpeg", "-y", *inputs_v, "-filter_complex", ";".join(vf),
+    r_vid = subprocess.run(["ffmpeg", "-y", *inputs_v, "-filter_complex", ";".join(vf),
                     "-map", "[vout]", "-c:v", "libx264", "-preset", "fast", "-crf", "23",
                     "-pix_fmt", "yuv420p", "-t", str(total_vid), "-an", video_only],
-                   capture_output=True)
+                   capture_output=True, text=True)
+    if r_vid.returncode != 0:
+        raise HTTPException(500, f"Video generation failed: {r_vid.stderr[-300:]}")
 
     # BUILD AUDIO
     inputs_a = []
@@ -365,9 +363,13 @@ def api_generate_reel(req: ReelRequest):
               f"aformat=channel_layouts=stereo[aout]")
 
     audio_only = os.path.join(REELS_DIR, f"tmp_a_{uuid.uuid4().hex[:8]}.m4a")
-    subprocess.run(["ffmpeg", "-y", *inputs_a, "-filter_complex", ";".join(af),
+    r_aud = subprocess.run(["ffmpeg", "-y", *inputs_a, "-filter_complex", ";".join(af),
                     "-map", "[aout]", "-c:a", "aac", "-b:a", "192k", audio_only],
-                   capture_output=True)
+                   capture_output=True, text=True)
+    if r_aud.returncode != 0:
+        if os.path.exists(video_only):
+            os.remove(video_only)
+        raise HTTPException(500, f"Audio generation failed: {r_aud.stderr[-300:]}")
 
     # MUX
     reel_id = f"{req.story_id}_{req.voice}_{req.bgm}_{uuid.uuid4().hex[:6]}"
