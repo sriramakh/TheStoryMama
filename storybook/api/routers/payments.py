@@ -1,161 +1,200 @@
-"""Stripe payment and webhook router."""
+"""FastSpring payment webhook router."""
 
-import stripe
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel
-from sqlalchemy.orm import Session
+import hmac
+import hashlib
+import json
+import logging
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, HTTPException, Request
 
 from config import Config
-from api.db.engine import get_db
-from api.db.models import User, Order, Credit
-from api.middleware.auth import require_auth
 
 router = APIRouter(prefix="/api/v1/payments", tags=["payments"])
 
-PLAN_CONFIG = {
-    "pack_5": {"credits": 5, "amount_cents": 999, "expires": False},
-    "monthly_10": {"credits": 10, "amount_cents": 1299, "expires": True},
-    "yearly_15": {"credits": 15, "amount_cents": 9900, "expires": True},
+logger = logging.getLogger(__name__)
+
+# Product path → credits mapping
+PRODUCT_CREDITS = {
+    "story-pack-5": {"credits": 5, "type": "one-time"},
+    "monthly-10": {"credits": 10, "type": "subscription"},
+    "annual-15": {"credits": 15, "type": "subscription"},
 }
 
-
-class CreateCheckoutRequest(BaseModel):
-    plan_type: str
-    success_url: str
-    cancel_url: str
+# In-memory credit store (for now — replace with DB later)
+# user_email -> {"credits": int, "orders": list}
+user_credits: dict[str, dict] = {}
 
 
-@router.post("/create-checkout")
-def create_checkout(
-    req: CreateCheckoutRequest,
-    user: User = Depends(require_auth),
-    db: Session = Depends(get_db),
-):
-    """Create a Stripe Checkout Session."""
-    if not Config.STRIPE_SECRET_KEY:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Payment system not configured",
-        )
+def verify_webhook_signature(payload: bytes, signature: str) -> bool:
+    """Verify FastSpring webhook HMAC-SHA256 signature."""
+    secret = Config.FASTSPRING_WEBHOOK_SECRET
+    if not secret:
+        logger.warning("No webhook secret configured — skipping verification")
+        return True
 
-    if req.plan_type not in PLAN_CONFIG:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid plan type: {req.plan_type}",
-        )
+    expected = hmac.new(
+        secret.encode(), payload, hashlib.sha256
+    ).hexdigest()
 
-    stripe.api_key = Config.STRIPE_SECRET_KEY
-    plan = PLAN_CONFIG[req.plan_type]
-
-    try:
-        session = stripe.checkout.Session.create(
-            payment_method_types=["card"],
-            line_items=[
-                {
-                    "price_data": {
-                        "currency": "usd",
-                        "product_data": {
-                            "name": f"TheStoryMama - {req.plan_type.replace('_', ' ').title()}",
-                            "description": f"{plan['credits']} story credits",
-                        },
-                        "unit_amount": plan["amount_cents"],
-                    },
-                    "quantity": 1,
-                }
-            ],
-            mode="payment",
-            success_url=req.success_url,
-            cancel_url=req.cancel_url,
-            metadata={
-                "user_id": str(user.id),
-                "plan_type": req.plan_type,
-            },
-        )
-
-        # Create pending order
-        order = Order(
-            user_id=user.id,
-            stripe_session_id=session.id,
-            plan_type=req.plan_type,
-            amount_cents=plan["amount_cents"],
-            status="pending",
-        )
-        db.add(order)
-        db.commit()
-
-        return {"checkout_url": session.url}
-
-    except stripe.StripeError as e:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Stripe error: {str(e)}",
-        )
+    return hmac.compare_digest(expected, signature)
 
 
-@router.post("/webhook")
-async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
-    """Handle Stripe webhook events."""
-    if not Config.STRIPE_SECRET_KEY or not Config.STRIPE_WEBHOOK_SECRET:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Webhook not configured",
-        )
-
-    stripe.api_key = Config.STRIPE_SECRET_KEY
+@router.post("/fastspring-webhook")
+async def fastspring_webhook(request: Request):
+    """Handle FastSpring webhook events."""
     payload = await request.body()
-    sig_header = request.headers.get("stripe-signature")
+
+    # Verify signature
+    signature = request.headers.get("X-FS-Signature", "")
+    if Config.FASTSPRING_WEBHOOK_SECRET and not verify_webhook_signature(payload, signature):
+        logger.warning("Invalid webhook signature")
+        raise HTTPException(status_code=401, detail="Invalid signature")
 
     try:
-        event = stripe.Webhook.construct_event(
-            payload, sig_header, Config.STRIPE_WEBHOOK_SECRET
-        )
-    except (ValueError, stripe.SignatureVerificationError):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid webhook signature",
-        )
+        data = json.loads(payload)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
 
-    if event["type"] == "checkout.session.completed":
-        session = event["data"]["object"]
-        _handle_checkout_completed(session, db)
+    events = data.get("events", [])
+
+    for event in events:
+        event_type = event.get("type", "")
+        event_data = event.get("data", {})
+
+        logger.info(f"FastSpring event: {event_type}")
+
+        if event_type == "order.completed":
+            _handle_order_completed(event_data)
+        elif event_type == "subscription.activated":
+            _handle_subscription_activated(event_data)
+        elif event_type == "subscription.deactivated":
+            _handle_subscription_deactivated(event_data)
+        elif event_type == "subscription.charge.completed":
+            _handle_subscription_renewed(event_data)
 
     return {"received": True}
 
 
-def _handle_checkout_completed(session: dict, db: Session):
-    """Grant credits after successful checkout."""
-    user_id = session.get("metadata", {}).get("user_id")
-    plan_type = session.get("metadata", {}).get("plan_type")
+def _handle_order_completed(data: dict):
+    """Grant credits when a one-time order completes."""
+    email = data.get("account", {}).get("contact", {}).get("email", "")
+    if not email:
+        email = data.get("customer", {}).get("email", "")
 
-    if not user_id or not plan_type or plan_type not in PLAN_CONFIG:
+    items = data.get("items", [])
+    order_id = data.get("id", "")
+
+    for item in items:
+        product_path = item.get("product", "")
+        product_config = PRODUCT_CREDITS.get(product_path)
+
+        if not product_config:
+            logger.warning(f"Unknown product: {product_path}")
+            continue
+
+        credits = product_config["credits"]
+
+        if email not in user_credits:
+            user_credits[email] = {"credits": 0, "orders": []}
+
+        user_credits[email]["credits"] += credits
+        user_credits[email]["orders"].append({
+            "order_id": order_id,
+            "product": product_path,
+            "credits": credits,
+            "type": product_config["type"],
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+
+        logger.info(f"Granted {credits} credits to {email} (order: {order_id}, product: {product_path})")
+
+
+def _handle_subscription_activated(data: dict):
+    """Grant credits when a subscription starts."""
+    email = data.get("account", {}).get("contact", {}).get("email", "")
+    if not email:
         return
 
-    # Update order status
-    order = (
-        db.query(Order)
-        .filter(Order.stripe_session_id == session["id"])
-        .first()
-    )
-    if order:
-        order.status = "paid"
+    product_path = data.get("product", {}).get("product", "")
+    product_config = PRODUCT_CREDITS.get(product_path)
 
-    # Grant credits
-    plan = PLAN_CONFIG[plan_type]
-    from datetime import datetime, timedelta, timezone
+    if not product_config:
+        # Try extracting from instructions or items
+        for key in ["instructions", "items"]:
+            items = data.get(key, [])
+            if isinstance(items, list):
+                for item in items:
+                    pp = item.get("product", "")
+                    if pp in PRODUCT_CREDITS:
+                        product_config = PRODUCT_CREDITS[pp]
+                        product_path = pp
+                        break
 
-    expires_at = None
-    if plan["expires"]:
-        if plan_type == "monthly_10":
-            expires_at = datetime.now(timezone.utc) + timedelta(days=30)
-        elif plan_type == "yearly_15":
-            expires_at = datetime.now(timezone.utc) + timedelta(days=30)
+    if not product_config:
+        logger.warning(f"Unknown subscription product for {email}")
+        return
 
-    credit = Credit(
-        user_id=user_id,
-        total=plan["credits"],
-        used=0,
-        order_id=order.id if order else None,
-        expires_at=expires_at,
-    )
-    db.add(credit)
-    db.commit()
+    credits = product_config["credits"]
+    sub_id = data.get("id", "")
+
+    if email not in user_credits:
+        user_credits[email] = {"credits": 0, "orders": []}
+
+    user_credits[email]["credits"] += credits
+    user_credits[email]["orders"].append({
+        "subscription_id": sub_id,
+        "product": product_path,
+        "credits": credits,
+        "type": "subscription_start",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+
+    logger.info(f"Subscription activated: {credits} credits to {email} (sub: {sub_id})")
+
+
+def _handle_subscription_deactivated(data: dict):
+    """Handle subscription cancellation."""
+    email = data.get("account", {}).get("contact", {}).get("email", "")
+    sub_id = data.get("id", "")
+    logger.info(f"Subscription deactivated for {email} (sub: {sub_id})")
+
+
+def _handle_subscription_renewed(data: dict):
+    """Grant credits on subscription renewal."""
+    email = data.get("account", {}).get("contact", {}).get("email", "")
+    if not email:
+        return
+
+    product_path = data.get("product", {}).get("product", "")
+    product_config = PRODUCT_CREDITS.get(product_path)
+
+    if not product_config:
+        logger.warning(f"Unknown renewal product for {email}")
+        return
+
+    credits = product_config["credits"]
+
+    if email not in user_credits:
+        user_credits[email] = {"credits": 0, "orders": []}
+
+    user_credits[email]["credits"] += credits
+    user_credits[email]["orders"].append({
+        "product": product_path,
+        "credits": credits,
+        "type": "renewal",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+
+    logger.info(f"Subscription renewed: {credits} credits to {email}")
+
+
+@router.get("/credits/{email}")
+def get_user_credits(email: str):
+    """Get credit balance for a user."""
+    data = user_credits.get(email, {"credits": 0, "orders": []})
+    return {
+        "email": email,
+        "credits": data["credits"],
+        "orders": data["orders"],
+    }

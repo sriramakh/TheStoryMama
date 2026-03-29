@@ -48,9 +48,11 @@ class Config:
     # Database
     DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://storymama:storymama@localhost:5432/storymama")
 
-    # Stripe
-    STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
-    STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+    # FastSpring
+    FASTSPRING_API_USER = os.getenv("FASTSPRING_API_USER", "")
+    FASTSPRING_API_PASSWORD = os.getenv("FASTSPRING_API_PASSWORD", "")
+    FASTSPRING_WEBHOOK_SECRET = os.getenv("FASTSPRING_WEBHOOK_SECRET", "")
+    FASTSPRING_STOREFRONT = os.getenv("FASTSPRING_STOREFRONT", "thestorymama.onfastspring.com")
 
     # JWT (shared secret with NextAuth)
     JWT_SECRET = os.getenv("NEXTAUTH_SECRET", "dev-secret-change-in-production")
