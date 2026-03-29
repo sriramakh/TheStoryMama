@@ -101,7 +101,10 @@ async def fastspring_webhook(request: Request):
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
     events = data.get("events", [])
-    logger.info(f"Webhook payload keys: {list(data.keys())}, events: {len(events)}")
+
+    # Dump full payload for debugging
+    import sys
+    print(f"[WEBHOOK] Payload: {json.dumps(data, indent=2)[:3000]}", file=sys.stderr, flush=True)
 
     for event in events:
         event_type = event.get("type", "")
