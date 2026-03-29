@@ -446,6 +446,237 @@ def _generate_reel_impl(req: ReelRequest, job_id: str):
         raise Exception("Failed to generate reel")
 
 
+# ── QC / Correction API ──────────────────────────────────────────────────────
+
+class CorrectionRequest(BaseModel):
+    story_id: str
+    scene_number: int
+    feedback: str  # e.g. "Lily should have brown skin not white", "Remove the fox from this scene"
+
+
+@app.get("/api/stories/{story_id}/details")
+def get_story_details(story_id: str):
+    """Get full story data for QC."""
+    story_path = os.path.join(STORIES_DIR, story_id, "story_data.json")
+    if not os.path.exists(story_path):
+        raise HTTPException(404, "Story not found")
+    with open(story_path) as f:
+        story = json.load(f)
+    return {
+        "id": story_id,
+        "title": story.get("title"),
+        "characters": story.get("characters", []),
+        "scenes": [
+            {
+                "scene_number": s["scene_number"],
+                "text": s["text"],
+                "image_description": s.get("image_description", ""),
+                "background": s.get("background", ""),
+                "image_url": f"/api/stories/{story_id}/image/{s['scene_number']}",
+            }
+            for s in story.get("scenes", [])
+        ],
+    }
+
+
+@app.post("/api/correct-scene")
+def correct_scene(req: CorrectionRequest):
+    """Regenerate a scene image based on QC feedback. Returns job_id for polling."""
+    story_path = os.path.join(STORIES_DIR, req.story_id, "story_data.json")
+    if not os.path.exists(story_path):
+        raise HTTPException(404, "Story not found")
+
+    job_id = uuid.uuid4().hex[:10]
+    jobs[job_id] = {"status": "running", "progress": 0, "message": "Starting correction...", "result": None}
+
+    def run():
+        try:
+            _correct_scene_impl(req, job_id)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            jobs[job_id] = {"status": "failed", "progress": 0, "message": str(e), "result": None}
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    return {"job_id": job_id}
+
+
+def _correct_scene_impl(req: CorrectionRequest, job_id: str):
+    """Regenerate a scene image with correction feedback."""
+    import base64
+
+    story_path = os.path.join(STORIES_DIR, req.story_id, "story_data.json")
+    with open(story_path) as f:
+        story = json.load(f)
+
+    scene = None
+    for s in story["scenes"]:
+        if s["scene_number"] == req.scene_number:
+            scene = s
+            break
+    if not scene:
+        raise Exception(f"Scene {req.scene_number} not found")
+
+    style_key = story.get("animation_style", Config.DEFAULT_ANIMATION_STYLE)
+    style = Config.ANIMATION_STYLES.get(style_key, Config.ANIMATION_STYLES[Config.DEFAULT_ANIMATION_STYLE])
+
+    # Step 1: Analyze context — get visual reference from adjacent scenes
+    jobs[job_id] = {"status": "running", "progress": 10, "message": "Analyzing context...", "result": None}
+
+    char_block = "\n".join(f"- {c['name']} ({c['type']}): {c['description']}" for c in story["characters"])
+
+    # Get visual reference from scene before (if exists)
+    visual_ref = ""
+    ref_scene_num = req.scene_number - 1 if req.scene_number > 1 else req.scene_number + 1
+    ref_img_path = None
+    for ext in ["_web.jpg", "_raw.png", ".jpg"]:
+        p = os.path.join(STORIES_DIR, req.story_id, f"scene_{ref_scene_num:02d}{ext}")
+        if os.path.exists(p):
+            ref_img_path = p
+            break
+
+    if ref_img_path:
+        with open(ref_img_path, "rb") as f:
+            ref_b64 = base64.b64encode(f.read()).decode()
+
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Describe each character in this image in ONE dense line each. Include: exact skin/fur color, hair/fur style, clothing with colors, accessories. Be extremely specific."},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{ref_b64}", "detail": "low"}}
+                ]
+            }],
+            max_tokens=300,
+        )
+        visual_ref = resp.choices[0].message.content.strip()
+
+    # Step 2: Generate corrected image
+    jobs[job_id] = {"status": "running", "progress": 30, "message": "Generating corrected image...", "result": None}
+
+    prompt = f"""{style['description']}
+
+BACKGROUND: {scene.get('background', story.get('setting', ''))}
+
+CHARACTERS:
+{char_block}
+
+{"CHARACTER VISUAL REFERENCE FROM ADJACENT SCENE (match exactly):" + chr(10) + visual_ref if visual_ref else ""}
+
+SCENE {scene['scene_number']} of {len(story['scenes'])}:
+{scene['image_description']}
+
+CORRECTION REQUESTED:
+{req.feedback}
+
+Apply the correction precisely. Everything else should remain the same as described.
+
+RULES:
+- {style['image_rules']}
+- Apply the correction feedback exactly
+- Keep character designs consistent with the visual reference
+- Warm, friendly expressions appropriate for a children's book
+- DO NOT include any text, words, letters, or numbers in the image"""
+
+    result = client.images.generate(
+        model="gpt-image-1-mini",
+        prompt=prompt,
+        size=Config.IMAGE_SIZE,
+        quality="medium",
+    )
+
+    # Save corrected image
+    sn = req.scene_number
+    story_dir = os.path.join(STORIES_DIR, req.story_id)
+
+    # Backup original
+    for ext in ["_raw.png", "_web.jpg", ".jpg"]:
+        orig = os.path.join(story_dir, f"scene_{sn:02d}{ext}")
+        backup = os.path.join(story_dir, f"scene_{sn:02d}{ext}.bak")
+        if os.path.exists(orig) and not os.path.exists(backup):
+            shutil.copy2(orig, backup)
+
+    # Save new raw
+    image_bytes = base64.b64decode(result.data[0].b64_json)
+    new_raw = os.path.join(story_dir, f"scene_{sn:02d}_raw.png")
+    with open(new_raw, "wb") as f:
+        f.write(image_bytes)
+
+    jobs[job_id] = {"status": "running", "progress": 60, "message": "Creating web version...", "result": None}
+
+    # Generate web-optimized version
+    img = Image.open(new_raw).convert("RGB")
+    web_path = os.path.join(story_dir, f"scene_{sn:02d}_web.jpg")
+    img.save(web_path, "JPEG", quality=82, optimize=True)
+
+    # Generate text overlay version
+    jobs[job_id] = {"status": "running", "progress": 75, "message": "Adding text overlay...", "result": None}
+
+    from text_overlay import TextOverlay
+    overlay = TextOverlay()
+    overlay_path = os.path.join(story_dir, f"scene_{sn:02d}.jpg")
+    overlay.overlay_text_on_image(
+        image_path=new_raw,
+        text=scene["text"],
+        output_path=overlay_path,
+        scene_number=sn,
+        total_scenes=len(story["scenes"]),
+        title=story["title"] if sn == 1 else None,
+        moral=story.get("moral") if sn == len(story["scenes"]) else None,
+    )
+
+    # Invalidate video cache for this story
+    for f in os.listdir(REELS_DIR):
+        if f.startswith(f"vcache_{req.story_id}"):
+            os.remove(os.path.join(REELS_DIR, f))
+
+    jobs[job_id] = {
+        "status": "done",
+        "progress": 100,
+        "message": "Correction complete!",
+        "result": {
+            "scene_number": sn,
+            "new_image_url": f"/api/stories/{req.story_id}/image/{sn}?t={int(time.time())}",
+            "backup_exists": True,
+        },
+    }
+
+
+@app.post("/api/approve-correction/{story_id}/{scene_num}")
+def approve_correction(story_id: str, scene_num: int):
+    """Approve a correction — delete backups."""
+    story_dir = os.path.join(STORIES_DIR, story_id)
+    removed = 0
+    for ext in ["_raw.png.bak", "_web.jpg.bak", ".jpg.bak"]:
+        bak = os.path.join(story_dir, f"scene_{scene_num:02d}{ext}")
+        if os.path.exists(bak):
+            os.remove(bak)
+            removed += 1
+    return {"approved": True, "backups_removed": removed}
+
+
+@app.post("/api/reject-correction/{story_id}/{scene_num}")
+def reject_correction(story_id: str, scene_num: int):
+    """Reject a correction — restore from backups."""
+    story_dir = os.path.join(STORIES_DIR, story_id)
+    restored = 0
+    for ext in ["_raw.png", "_web.jpg", ".jpg"]:
+        bak = os.path.join(story_dir, f"scene_{scene_num:02d}{ext}.bak")
+        orig = os.path.join(story_dir, f"scene_{scene_num:02d}{ext}")
+        if os.path.exists(bak):
+            shutil.move(bak, orig)
+            restored += 1
+
+    # Invalidate video cache
+    for f in os.listdir(REELS_DIR):
+        if f.startswith(f"vcache_{story_id}"):
+            os.remove(os.path.join(REELS_DIR, f))
+
+    return {"rejected": True, "files_restored": restored}
+
+
 # ── Frontend ─────────────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
@@ -765,6 +996,275 @@ function pollJob(jobId) {
       }
     })
     .catch(() => setTimeout(() => pollJob(jobId), 2000));
+}
+</script>
+</body>
+</html>"""
+
+
+@app.get("/qc", response_class=HTMLResponse)
+def qc_page():
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Story QC - TheStoryMama</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Nunito', Arial, sans-serif; background: #FFF9EB; color: #4A3728; padding: 20px; max-width: 1400px; margin: 0 auto; }
+h1 { color: #654321; margin-bottom: 4px; }
+.subtitle { color: #8B7D6B; margin-bottom: 20px; font-size: 14px; }
+a { color: #E8829A; }
+
+.top-bar { display: flex; gap: 16px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
+.top-bar select { padding: 8px 12px; border-radius: 10px; border: 1px solid #EDE5D8; font-size: 14px; min-width: 300px; }
+
+.scene-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+.scene-card { background: white; border-radius: 14px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.06); cursor: pointer; transition: all 0.15s; }
+.scene-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.12); transform: translateY(-2px); }
+.scene-card.selected { ring: 3px solid #E8829A; outline: 3px solid #E8829A; }
+.scene-card img { width: 100%; display: block; }
+.scene-card .info { padding: 10px 12px; }
+.scene-card .info .num { font-size: 11px; color: #8B7D6B; font-weight: 600; }
+.scene-card .info .text { font-size: 13px; margin-top: 4px; line-height: 1.4; }
+
+.correction-panel { background: white; border-radius: 14px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); margin-top: 20px; display: none; }
+.correction-panel h3 { font-size: 16px; color: #654321; margin-bottom: 12px; }
+
+.compare { display: flex; gap: 16px; margin: 16px 0; flex-wrap: wrap; }
+.compare .img-box { flex: 1; min-width: 200px; }
+.compare .img-box img { width: 100%; border-radius: 10px; }
+.compare .img-box .label { font-size: 12px; font-weight: 600; text-align: center; margin-top: 6px; color: #8B7D6B; }
+
+textarea { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #EDE5D8; font-size: 14px; resize: vertical; min-height: 80px; font-family: inherit; }
+
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 10px 20px; border: none; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-fix { background: #FFD6E0; color: #654321; }
+.btn-fix:hover { background: #F5C6D0; }
+.btn-approve { background: #D4F5E9; color: #2D5F4A; }
+.btn-approve:hover { background: #B8E8D5; }
+.btn-reject { background: #FFE0E0; color: #C94B4B; }
+.btn-reject:hover { background: #FFD0D0; }
+.btn-row { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+
+.progress-bar { height: 6px; background: #EDE5D8; border-radius: 3px; margin: 12px 0; overflow: hidden; display: none; }
+.progress-bar .fill { height: 100%; background: linear-gradient(to right, #FFD6E0, #E8D5F5); border-radius: 3px; transition: width 0.3s; }
+.progress-msg { font-size: 13px; color: #8B7D6B; }
+
+.status { padding: 10px 14px; border-radius: 10px; font-size: 13px; margin-top: 12px; }
+.status.success { background: #D4F5E9; color: #2D5F4A; }
+.status.error { background: #FFE0E0; color: #C94B4B; }
+
+.context-images { display: flex; gap: 8px; margin: 12px 0; }
+.context-images img { height: 120px; border-radius: 6px; border: 2px solid transparent; }
+.context-images img.current { border-color: #E8829A; }
+.context-images .ctx-label { font-size: 10px; color: #8B7D6B; text-align: center; }
+</style>
+</head>
+<body>
+
+<h1>Story QC & Correction</h1>
+<p class="subtitle">Select a story and click any scene to correct it. <a href="/">Back to Reel Studio</a></p>
+
+<div class="top-bar">
+  <select id="storySelect" onchange="loadStory(this.value)">
+    <option value="">Select a story...</option>
+  </select>
+  <span id="storyInfo" style="font-size:13px; color:#8B7D6B;"></span>
+</div>
+
+<div class="scene-grid" id="sceneGrid"></div>
+
+<div class="correction-panel" id="correctionPanel">
+  <h3>Correct Scene <span id="corrSceneNum"></span></h3>
+
+  <div class="context-images" id="contextImages"></div>
+
+  <div style="margin-bottom:12px;">
+    <div style="font-size:12px; color:#8B7D6B; margin-bottom:4px;">Scene text:</div>
+    <div id="sceneText" style="font-size:14px; background:#FFF9EB; padding:10px; border-radius:8px;"></div>
+  </div>
+
+  <label style="font-size:13px; font-weight:600; display:block; margin-bottom:4px;">What needs to be corrected?</label>
+  <textarea id="feedbackInput" placeholder="e.g. Lily should have brown skin matching scene 2. The fox should not be in this scene. Change the background to a sunny meadow."></textarea>
+
+  <div class="btn-row">
+    <button class="btn btn-fix" id="fixBtn" onclick="submitCorrection()">Regenerate Scene</button>
+  </div>
+
+  <div class="progress-bar" id="corrProgress"><div class="fill" id="corrProgressFill"></div></div>
+  <div class="progress-msg" id="corrProgressMsg"></div>
+
+  <div class="compare" id="compareArea" style="display:none;">
+    <div class="img-box">
+      <img id="beforeImg">
+      <div class="label">Before</div>
+    </div>
+    <div class="img-box">
+      <img id="afterImg">
+      <div class="label">After</div>
+    </div>
+  </div>
+
+  <div class="btn-row" id="approvalBtns" style="display:none;">
+    <button class="btn btn-approve" onclick="approveCorrection()">Approve & Publish</button>
+    <button class="btn btn-reject" onclick="rejectCorrection()">Reject & Revert</button>
+    <button class="btn btn-fix" onclick="submitCorrection()">Try Again with More Feedback</button>
+  </div>
+
+  <div id="corrStatus"></div>
+</div>
+
+<script>
+let storyData = null;
+let selectedScene = null;
+let beforeImageUrl = null;
+
+fetch('/api/stories').then(r => r.json()).then(data => {
+  const sel = document.getElementById('storySelect');
+  data.stories.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.id;
+    opt.textContent = s.title + ' (' + s.scenes + ' scenes)';
+    sel.appendChild(opt);
+  });
+});
+
+function loadStory(id) {
+  if (!id) return;
+  fetch('/api/stories/' + id + '/details').then(r => r.json()).then(data => {
+    storyData = data;
+    document.getElementById('storyInfo').textContent = data.characters.map(c => c.name + ' (' + c.type + ')').join(', ');
+    renderScenes();
+    document.getElementById('correctionPanel').style.display = 'none';
+  });
+}
+
+function renderScenes() {
+  const grid = document.getElementById('sceneGrid');
+  grid.innerHTML = storyData.scenes.map(s => `
+    <div class="scene-card" id="sc-${s.scene_number}" onclick="selectScene(${s.scene_number})">
+      <img src="${s.image_url}?t=${Date.now()}" loading="lazy">
+      <div class="info">
+        <div class="num">Scene ${s.scene_number}</div>
+        <div class="text">${s.text}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function selectScene(num) {
+  selectedScene = storyData.scenes.find(s => s.scene_number === num);
+  document.querySelectorAll('.scene-card').forEach(el => el.classList.remove('selected'));
+  document.getElementById('sc-' + num).classList.add('selected');
+
+  document.getElementById('corrSceneNum').textContent = '#' + num;
+  document.getElementById('sceneText').textContent = selectedScene.text;
+  document.getElementById('correctionPanel').style.display = 'block';
+  document.getElementById('compareArea').style.display = 'none';
+  document.getElementById('approvalBtns').style.display = 'none';
+  document.getElementById('corrStatus').innerHTML = '';
+  document.getElementById('feedbackInput').value = '';
+
+  beforeImageUrl = selectedScene.image_url + '?t=' + Date.now();
+
+  // Show context: prev, current, next
+  const ctx = document.getElementById('contextImages');
+  let html = '';
+  const prev = storyData.scenes.find(s => s.scene_number === num - 1);
+  if (prev) html += '<div><img src="' + prev.image_url + '?t=' + Date.now() + '"><div class="ctx-label">Scene ' + (num-1) + '</div></div>';
+  html += '<div><img src="' + beforeImageUrl + '" class="current"><div class="ctx-label">Scene ' + num + ' (current)</div></div>';
+  const next = storyData.scenes.find(s => s.scene_number === num + 1);
+  if (next) html += '<div><img src="' + next.image_url + '?t=' + Date.now() + '"><div class="ctx-label">Scene ' + (num+1) + '</div></div>';
+  ctx.innerHTML = html;
+
+  window.scrollTo({ top: document.getElementById('correctionPanel').offsetTop - 20, behavior: 'smooth' });
+}
+
+function submitCorrection() {
+  const feedback = document.getElementById('feedbackInput').value.trim();
+  if (!feedback) { alert('Please describe what needs to be corrected'); return; }
+
+  document.getElementById('fixBtn').disabled = true;
+  document.getElementById('corrProgress').style.display = 'block';
+  document.getElementById('compareArea').style.display = 'none';
+  document.getElementById('approvalBtns').style.display = 'none';
+  updateCorrProgress(0, 'Starting...');
+
+  fetch('/api/correct-scene', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      story_id: storyData.id,
+      scene_number: selectedScene.scene_number,
+      feedback: feedback,
+    }),
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.job_id) pollCorrectionJob(data.job_id);
+    else {
+      document.getElementById('corrStatus').innerHTML = '<div class="status error">Failed: ' + (data.detail || 'Unknown') + '</div>';
+      document.getElementById('fixBtn').disabled = false;
+    }
+  })
+  .catch(e => {
+    document.getElementById('corrStatus').innerHTML = '<div class="status error">Error: ' + e.message + '</div>';
+    document.getElementById('fixBtn').disabled = false;
+  });
+}
+
+function updateCorrProgress(pct, msg) {
+  document.getElementById('corrProgressFill').style.width = pct + '%';
+  document.getElementById('corrProgressMsg').textContent = msg + ' (' + pct + '%)';
+}
+
+function pollCorrectionJob(jobId) {
+  fetch('/api/job/' + jobId).then(r => r.json()).then(data => {
+    updateCorrProgress(data.progress, data.message);
+
+    if (data.status === 'done') {
+      document.getElementById('corrProgress').style.display = 'none';
+      document.getElementById('fixBtn').disabled = false;
+
+      // Show before/after comparison
+      document.getElementById('beforeImg').src = beforeImageUrl;
+      document.getElementById('afterImg').src = data.result.new_image_url;
+      document.getElementById('compareArea').style.display = 'flex';
+      document.getElementById('approvalBtns').style.display = 'flex';
+      document.getElementById('corrStatus').innerHTML = '<div class="status success">New image generated! Compare and approve or reject.</div>';
+    } else if (data.status === 'failed') {
+      document.getElementById('corrProgress').style.display = 'none';
+      document.getElementById('fixBtn').disabled = false;
+      document.getElementById('corrStatus').innerHTML = '<div class="status error">Failed: ' + data.message + '</div>';
+    } else {
+      setTimeout(() => pollCorrectionJob(jobId), 1500);
+    }
+  }).catch(() => setTimeout(() => pollCorrectionJob(jobId), 2000));
+}
+
+function approveCorrection() {
+  fetch('/api/approve-correction/' + storyData.id + '/' + selectedScene.scene_number, { method: 'POST' })
+    .then(r => r.json())
+    .then(() => {
+      document.getElementById('corrStatus').innerHTML = '<div class="status success">Approved! Changes published to thestorymama.club.</div>';
+      document.getElementById('approvalBtns').style.display = 'none';
+      // Refresh the scene grid
+      renderScenes();
+    });
+}
+
+function rejectCorrection() {
+  fetch('/api/reject-correction/' + storyData.id + '/' + selectedScene.scene_number, { method: 'POST' })
+    .then(r => r.json())
+    .then(() => {
+      document.getElementById('corrStatus').innerHTML = '<div class="status error">Rejected. Original image restored.</div>';
+      document.getElementById('compareArea').style.display = 'none';
+      document.getElementById('approvalBtns').style.display = 'none';
+      renderScenes();
+    });
 }
 </script>
 </body>
