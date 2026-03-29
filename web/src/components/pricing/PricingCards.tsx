@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -16,7 +17,33 @@ const PLAN_TO_PRODUCT: Record<string, string> = {
 export function PricingCards() {
   const { data: session } = useSession();
 
-  function handlePurchase(planId: string) {
+  // Load FastSpring SBL
+  useEffect(() => {
+    if (document.getElementById("fsc-api")) return;
+
+    // Define callback before loading script
+    (window as unknown as Record<string, unknown>).fscDataCallback = function (data: unknown) {
+      console.log("FastSpring data:", data);
+    };
+    (window as unknown as Record<string, unknown>).fscPopupClosed = function (data: unknown) {
+      console.log("FastSpring popup closed:", data);
+      if (data) {
+        window.location.href = "/dashboard?purchased=true";
+      }
+    };
+
+    const script = document.createElement("script");
+    script.id = "fsc-api";
+    script.src = "https://sbl.onfastspring.com/sbl/1.0.3/fastspring-builder.min.js";
+    script.type = "text/javascript";
+    script.setAttribute("data-storefront", FASTSPRING_STOREFRONT);
+    script.setAttribute("data-data-callback", "fscDataCallback");
+    script.setAttribute("data-popup-closed", "fscPopupClosed");
+    script.setAttribute("data-popup-webhook-received", "fscPopupClosed");
+    document.head.appendChild(script);
+  }, []);
+
+  const handlePurchase = useCallback((planId: string) => {
     const productPath = PLAN_TO_PRODUCT[planId];
     if (!productPath) return;
 
@@ -25,10 +52,29 @@ export function PricingCards() {
       return;
     }
 
-    // Direct link to FastSpring checkout with email pre-filled
-    const email = encodeURIComponent(session.user.email || "");
-    window.location.href = `https://${FASTSPRING_STOREFRONT}/checkout?product_1_path=${productPath}&contact_email=${email}`;
-  }
+    const fs = (window as unknown as Record<string, unknown>).fastspring as
+      | { builder: { recognize: (d: Record<string, string>) => void; push: (d: unknown) => void } }
+      | undefined;
+
+    if (fs?.builder) {
+      // Pre-fill email
+      if (session.user.email) {
+        fs.builder.recognize({ email: session.user.email });
+      }
+      // Add product and open checkout
+      fs.builder.push({
+        products: [{ path: productPath, quantity: 1 }],
+        checkout: true,
+      });
+    } else {
+      // Fallback: direct URL
+      const email = encodeURIComponent(session.user.email || "");
+      window.open(
+        `https://${FASTSPRING_STOREFRONT}/session/new/product/${productPath}?contact_email=${email}`,
+        "_blank"
+      );
+    }
+  }, [session]);
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 lg:gap-8">

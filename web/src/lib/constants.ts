@@ -1,7 +1,7 @@
 export const API_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-export const FASTSPRING_STOREFRONT = "thestorymama.onfastspring.com";
+export const FASTSPRING_STOREFRONT = "thestorymama_store.onfastspring.com";
 
 export const STORY_CATEGORIES = [
   { id: "animals", label: "Animals", emoji: "🐻" },
