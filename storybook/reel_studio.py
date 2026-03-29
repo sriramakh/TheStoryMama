@@ -509,7 +509,7 @@ h1 { color: #654321; margin-bottom: 8px; }
 .tts-status .ready { color: #2D5F4A; }
 
 .scene-preview { display: flex; gap: 8px; overflow-x: auto; padding: 10px 0; max-width: 100%; }
-.scene-preview img { height: 160px; border-radius: 8px; flex-shrink: 0; cursor: pointer; transition: transform 0.15s; }
+.scene-preview img { height: 280px; border-radius: 8px; flex-shrink: 0; cursor: pointer; transition: transform 0.15s; }
 .scene-preview img:hover { transform: scale(1.05); }
 .panel { min-width: 0; overflow: hidden; }
 </style>
