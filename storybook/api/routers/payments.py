@@ -25,6 +25,9 @@ PRODUCT_CREDITS = {
 # user_email -> {"credits": int, "orders": list}
 user_credits: dict[str, dict] = {}
 
+# Account ID -> email mapping (FastSpring subscriptions only send account ID)
+account_email_map: dict[str, str] = {}
+
 
 def _extract_email(data: dict) -> str:
     """Extract email from FastSpring event data — handles various payload structures."""
@@ -49,6 +52,14 @@ def _extract_email(data: dict) -> str:
     # Try top-level email
     if isinstance(data.get("email"), str):
         return data["email"]
+
+    # Check recipients array
+    recipients = data.get("recipients", [])
+    if isinstance(recipients, list):
+        for r in recipients:
+            recip = r.get("recipient", r)
+            if isinstance(recip, dict) and recip.get("email"):
+                return recip["email"]
 
     # Search all string values for email-like patterns
     for key, val in data.items():
@@ -129,7 +140,13 @@ def _handle_order_completed(data: dict):
     logger.info(f"Order data keys: {list(data.keys())}")
 
     email = _extract_email(data)
-    logger.info(f"Extracted email: {email}")
+
+    # Cache account → email mapping for subscription events
+    account_id = data.get("account", "")
+    if isinstance(account_id, str) and email:
+        account_email_map[account_id] = email
+
+    print(f"[WEBHOOK] order.completed — email: {email}, account: {account_id}", flush=True)
 
     items = data.get("items", [])
     if not isinstance(items, list):
@@ -171,8 +188,18 @@ def _handle_subscription_activated(data: dict):
     logger.info(f"Subscription data keys: {list(data.keys())}")
 
     email = _extract_email(data)
+
+    # Fallback: look up email from account ID cache
     if not email:
-        logger.warning("No email found in subscription event")
+        account_id = data.get("account", "")
+        if isinstance(account_id, str):
+            email = account_email_map.get(account_id, "")
+
+    if not email:
+        print("[WEBHOOK] No email found in subscription event", flush=True)
+        return
+
+    print(f"[WEBHOOK] subscription.activated — email: {email}, product: {data.get('product', '')}", flush=True)
 
     # Try various product path locations
     product_path = ""
