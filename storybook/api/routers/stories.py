@@ -103,12 +103,14 @@ async def get_scene_image(story_id: str, scene_num: int):
     path = story_service.get_scene_image_path(story_id, scene_num)
     if path is None:
         raise HTTPException(status_code=404, detail="Scene image not found")
-    # Cache images aggressively — they never change
+    # Cache images — use file modification time for cache busting
+    import os
+    mtime = int(os.path.getmtime(path))
     return FileResponse(
         path,
         headers={
-            "Cache-Control": "public, max-age=31536000, immutable",
-            "CDN-Cache-Control": "public, max-age=31536000",
+            "Cache-Control": "public, max-age=86400",
+            "ETag": f'"{mtime}"',
         },
     )
 
