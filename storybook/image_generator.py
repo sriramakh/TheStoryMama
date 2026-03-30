@@ -919,4 +919,219 @@ Respond ONLY with JSON: {{"confidence": 0.85, "reason": "short note"}}"""
             except Exception as e:
                 print(f"   Scene {scene_num}: Gemini fallback failed ({e}), keeping original")
 
+        # ── Phase 4: Enhanced QC — character consistency + background accuracy ──
+        # Uses last 2-3 scenes as reference (they tend to be most consistent)
+        if progress_callback:
+            progress_callback(1, total, "quality checking")
+
+        image_paths = self._enhanced_qc(story, image_paths, output_dir, progress_callback)
+
         return image_paths
+
+    def _enhanced_qc(
+        self,
+        story: dict,
+        image_paths: list[str],
+        output_dir: str,
+        progress_callback=None,
+    ) -> list[str]:
+        """
+        Enhanced QC: check every scene for character consistency and background accuracy.
+        Uses last 2-3 completed scenes as reference baseline.
+        Threshold: 0.75. Max 5 retries per scene, keeps the best attempt.
+        """
+        total = len(story["scenes"])
+        characters = story["characters"]
+        QC_THRESHOLD = 0.75
+        MAX_RETRIES = 5
+
+        char_block = "\n".join(
+            f"- {c['name']} ({c['type']}): {c['description']}"
+            for c in characters
+        )
+
+        # Build reference from last 2-3 scenes (most consistent by this point)
+        ref_indices = list(range(max(0, total - 3), total))
+        ref_descriptions = self._extract_reference_from_scenes(
+            [image_paths[i] for i in ref_indices], characters
+        )
+
+        failed_scenes = []
+
+        for i, scene in enumerate(story["scenes"]):
+            scene_num = scene["scene_number"]
+
+            if progress_callback:
+                progress_callback(scene_num, total, "qc checking")
+
+            score = self._qc_score_scene(
+                image_paths[i], scene, char_block, ref_descriptions
+            )
+
+            if score >= QC_THRESHOLD:
+                print(f"   Scene {scene_num}: QC passed ({score:.2f})")
+                continue
+
+            # Scene needs correction — retry up to MAX_RETRIES times
+            print(f"   Scene {scene_num}: QC failed ({score:.2f}) — regenerating...")
+            best_score = score
+            best_path = image_paths[i]
+
+            for attempt in range(MAX_RETRIES):
+                if progress_callback:
+                    progress_callback(scene_num, total, f"retry {attempt + 1}/{MAX_RETRIES}")
+
+                try:
+                    retry_path = os.path.join(output_dir, f"scene_{scene_num:02d}_retry{attempt}.png")
+                    self.generate_scene_image(story, scene, i, retry_path)
+                    time.sleep(1.5)
+
+                    retry_score = self._qc_score_scene(
+                        retry_path, scene, char_block, ref_descriptions
+                    )
+                    print(f"   Scene {scene_num} retry {attempt + 1}: score={retry_score:.2f}")
+
+                    if retry_score > best_score:
+                        best_score = retry_score
+                        best_path = retry_path
+
+                    if retry_score >= QC_THRESHOLD:
+                        break
+
+                except Exception as e:
+                    print(f"   Scene {scene_num} retry {attempt + 1} failed: {e}")
+
+            # Use the best version
+            original_path = image_paths[i]
+            if best_path != original_path:
+                import shutil
+                shutil.copy2(best_path, original_path)
+                print(f"   Scene {scene_num}: using best attempt (score={best_score:.2f})")
+            else:
+                print(f"   Scene {scene_num}: keeping original (best score={best_score:.2f})")
+
+            # Clean up retry files
+            for attempt in range(MAX_RETRIES):
+                retry_path = os.path.join(output_dir, f"scene_{scene_num:02d}_retry{attempt}.png")
+                if os.path.exists(retry_path) and retry_path != best_path:
+                    os.remove(retry_path)
+
+            if best_score < QC_THRESHOLD:
+                failed_scenes.append((scene_num, best_score))
+
+        if failed_scenes:
+            print(f"\n   QC: {len(failed_scenes)} scene(s) below threshold after retries: "
+                  f"{[(s, f'{sc:.2f}') for s, sc in failed_scenes]}")
+        else:
+            print(f"\n   QC: All scenes passed!")
+
+        return image_paths
+
+    def _extract_reference_from_scenes(
+        self, ref_image_paths: list[str], characters: list[dict]
+    ) -> str:
+        """Extract character appearance reference from the last 2-3 scene images."""
+        descriptions = []
+        for path in ref_image_paths:
+            if not os.path.exists(path):
+                continue
+            try:
+                with open(path, "rb") as f:
+                    img_b64 = base64.b64encode(f.read()).decode()
+
+                char_names = ", ".join(c["name"] for c in characters)
+                response = self.openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": (
+                                f"Describe each character ({char_names}) in this image in ONE line each. "
+                                "Include: exact skin/fur color, hair/fur style, eye color, clothing with exact colors, accessories. "
+                                "Be extremely precise about colors and features."
+                            )},
+                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}", "detail": "low"}}
+                        ]
+                    }],
+                    max_tokens=300,
+                )
+                descriptions.append(response.choices[0].message.content.strip())
+            except Exception as e:
+                print(f"   Reference extraction failed for {path}: {e}")
+
+        return "\n---\n".join(descriptions) if descriptions else ""
+
+    def _qc_score_scene(
+        self, image_path: str, scene: dict, char_block: str, ref_descriptions: str
+    ) -> float:
+        """
+        Score a scene image on two criteria:
+        1. Character consistency (face, dress, appearance vs reference)
+        2. Background accuracy (does setting match scene description?)
+        Returns average score 0.0-1.0.
+        """
+        try:
+            with open(image_path, "rb") as f:
+                img_b64 = base64.b64encode(f.read()).decode()
+
+            prompt = f"""You are a strict QC reviewer for a children's picture book.
+
+CHARACTERS IN THIS STORY:
+{char_block}
+
+CHARACTER APPEARANCE FROM REFERENCE SCENES (must match exactly):
+{ref_descriptions}
+
+SCENE {scene.get('scene_number', '?')} DESCRIPTION:
+Background: {scene.get('background', '')}
+Action: {scene.get('image_description', '')}
+Text: {scene.get('text', '')}
+
+Look at this image and score TWO criteria (0.0 to 1.0 each):
+
+1. CHARACTER_CONSISTENCY: Do the characters match the reference appearance exactly?
+   Score 1.0 if skin/fur color, hair, clothing, accessories all match.
+   Score 0.5 if minor differences (slightly different shade).
+   Score 0.0 if major differences (wrong skin color, wrong species, wrong clothing).
+
+2. BACKGROUND_ACCURACY: Does the background/setting match the scene description?
+   Score 1.0 if the setting clearly matches.
+   Score 0.5 if partially matches.
+   Score 0.0 if completely wrong setting.
+
+Respond ONLY with JSON:
+{{"character_consistency": 0.85, "background_accuracy": 0.90, "issues": "brief note or empty string"}}"""
+
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}", "detail": "low"}}
+                    ]
+                }],
+                max_tokens=200,
+            )
+
+            raw = response.choices[0].message.content.strip()
+            if raw.startswith("```"):
+                raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+            start = raw.find("{")
+            end = raw.rfind("}") + 1
+            result = json.loads(raw[start:end])
+
+            char_score = float(result.get("character_consistency", 0.5))
+            bg_score = float(result.get("background_accuracy", 0.5))
+            issues = result.get("issues", "")
+
+            avg = (char_score + bg_score) / 2
+
+            if issues:
+                print(f"     char={char_score:.2f} bg={bg_score:.2f} avg={avg:.2f} — {issues}")
+
+            return avg
+
+        except Exception as e:
+            print(f"     QC scoring failed: {e}")
+            return 0.5  # Don't block on review failure
