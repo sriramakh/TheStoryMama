@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 import { Nunito, Quicksand } from "next/font/google";
 import "./globals.css";
 import { Navbar } from "@/components/layout/Navbar";
@@ -55,6 +56,12 @@ export default function RootLayout({
       className={`${nunito.variable} ${quicksand.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col font-[family-name:var(--font-nunito)]">
+        <Script
+          defer
+          src="https://analytics.thestorymama.club/script.js"
+          data-website-id="e92ce353-17aa-40f5-8d9a-06286d9e08f3"
+          strategy="afterInteractive"
+        />
         <SessionProvider>
           <Navbar />
           <main className="flex-1">{children}</main>
