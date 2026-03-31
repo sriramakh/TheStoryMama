@@ -51,6 +51,8 @@ class ImageGenerator:
 
         # MiniMax subject_reference: holds scene 1's base64 image for consistency
         self._reference_image_b64: str | None = None
+        # Scene 1 image path — passed as reference to gpt-image for character consistency
+        self._reference_image_path: str | None = None
         # Character visual sheet extracted from scene 1's rendered image by GPT-4o-mini
         self._character_visual_sheet: str | None = None
         # Prior scene PIL images for Gemini visual context
@@ -502,30 +504,31 @@ SCENE {scene['scene_number']}/{len(scenes)}: {scene['image_description']}{scene_
 
         background = scene.get("background") or story.get("setting", "")
 
-        # Determine which characters appear in this scene by checking the image_description.
-        # By default all characters are present; only exclude if the story text explicitly
-        # says a character is absent (e.g. "without Rosie", "Rosie is not in this scene").
+        # Determine which characters appear in this scene.
+        # Only include characters who are EXPLICITLY named in the image_description.
+        # For scene 1: include all characters (establishment shot).
         image_desc_lower = scene.get("image_description", "").lower()
+        scene_text_lower = scene.get("text", "").lower()
+        combined_lower = image_desc_lower + " " + scene_text_lower
+
         scene_chars = []
         absent_chars = []
-        for c in all_chars:
-            name_lower = c["name"].lower()
-            # Check for explicit absence indicators
-            is_absent = any(
-                phrase in image_desc_lower
-                for phrase in [
-                    f"without {name_lower}",
-                    f"{name_lower} is not",
-                    f"{name_lower} is absent",
-                    f"{name_lower} is missing",
-                    f"no {name_lower}",
-                    f"{name_lower} is nowhere",
-                ]
-            )
-            if is_absent:
-                absent_chars.append(c)
-            else:
-                scene_chars.append(c)
+
+        if scene_index == 0:
+            # Scene 1: all characters present for establishment
+            scene_chars = list(all_chars)
+        else:
+            for c in all_chars:
+                name_lower = c["name"].lower()
+                # Character must be mentioned by name in image_description or scene text
+                if name_lower in combined_lower:
+                    scene_chars.append(c)
+                else:
+                    absent_chars.append(c)
+
+            # If no characters detected (generic text like "everyone"), include all
+            if not scene_chars:
+                scene_chars = list(all_chars)
 
         num_chars_in_scene = len(scene_chars)
 
@@ -596,24 +599,47 @@ RULES:
         output_path: str,
         retry_count: int = 3,
     ) -> str:
-        """Generate an illustration for a single scene using gpt-image-1-mini."""
+        """Generate an illustration for a single scene using gpt-image-1-mini.
+        For scenes 2+, passes scene 1 image as reference for character consistency."""
         prompt = self._build_gpt_image_prompt(story, scene, scene_index)
 
         for attempt in range(retry_count):
             try:
-                result = self.openai_client.images.generate(
-                    model="gpt-image-1-mini",
-                    prompt=prompt,
-                    size=self.size,
-                    quality="medium",
-                )
+                # Build API call params
+                api_params = {
+                    "model": "gpt-image-1-mini",
+                    "prompt": prompt,
+                    "size": self.size,
+                    "quality": "medium",
+                }
+
+                # For scenes 2+: pass scene 1 image as reference for character consistency
+                if scene_index > 0 and self._reference_image_path:
+                    try:
+                        ref_path = self._reference_image_path
+                        # Read reference image as base64
+                        with open(ref_path, "rb") as f:
+                            ref_b64 = base64.b64encode(f.read()).decode()
+
+                        api_params["image"] = [
+                            {
+                                "type": "base64",
+                                "media_type": "image/png",
+                                "data": ref_b64,
+                            }
+                        ]
+                    except Exception as ref_e:
+                        print(f"   Warning: Could not attach reference image: {ref_e}")
+
+                result = self.openai_client.images.generate(**api_params)
 
                 image_bytes = base64.b64decode(result.data[0].b64_json)
                 with open(output_path, "wb") as f:
                     f.write(image_bytes)
 
-                # After scene 1: analyze for character visual sheet
+                # After scene 1: save as reference + analyze visual sheet
                 if scene_index == 0:
+                    self._reference_image_path = output_path
                     print("   Analyzing scene 1 for character visual consistency...")
                     self._character_visual_sheet = self._analyze_reference_image(
                         output_path, story["characters"]
