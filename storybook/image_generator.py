@@ -53,6 +53,8 @@ class ImageGenerator:
         self._reference_image_b64: str | None = None
         # Scene 1 image path — passed as reference to gpt-image for character consistency
         self._reference_image_path: str | None = None
+        # Recent scene image paths — last N scenes passed for continuity
+        self._recent_scene_paths: list[str] = []
         # Character visual sheet extracted from scene 1's rendered image by GPT-4o-mini
         self._character_visual_sheet: str | None = None
         # Prior scene PIL images for Gemini visual context
@@ -571,7 +573,9 @@ IMPORTANT — CHARACTER VISUAL REFERENCE (how each character ACTUALLY looks — 
 
             prompt = f"""{style['description']}
 
-{sheet_section}CHARACTERS IN THIS SCENE — draw ONLY these characters, EXACTLY as described:
+The attached images are PREVIOUS SCENES from this storybook. Match the character designs EXACTLY — same species, face, skin/fur color, clothing, proportions.
+
+{sheet_section}CHARACTERS IN THIS SCENE — draw ONLY these characters, matching their appearance from the reference images:
 {present_block}
 
 BACKGROUND: {background}
@@ -584,7 +588,7 @@ SCENE {scene['scene_number']} of {len(scenes)}:
 RULES:
 - {style['image_rules']}
 - Draw EXACTLY {num_chars_in_scene} characters in this scene — no more, no less
-- Every character MUST look IDENTICAL to how they appeared in scene 1 — same species, same face shape, same body proportions, same colors, same clothing, same accessories
+- Every character MUST look IDENTICAL to the reference images — same species, same face, same skin/fur color, same clothing, same accessories
 - Warm, friendly expressions appropriate for a children's book
 - Suitable for a 2-4 year old child
 - DO NOT include any text, words, letters, or numbers in the image"""
@@ -613,23 +617,32 @@ RULES:
                     "quality": "medium",
                 }
 
-                # For scenes 2+: pass scene 1 image as reference for character consistency
+                # For scenes 2+: pass scene 1 + previous scene images as reference
                 if scene_index > 0 and self._reference_image_path:
                     try:
-                        ref_path = self._reference_image_path
-                        # Read reference image as base64
-                        with open(ref_path, "rb") as f:
-                            ref_b64 = base64.b64encode(f.read()).decode()
+                        ref_images = []
 
-                        api_params["image"] = [
-                            {
+                        # Always include scene 1 (character anchor)
+                        with open(self._reference_image_path, "rb") as f:
+                            ref_images.append({
                                 "type": "base64",
                                 "media_type": "image/png",
-                                "data": ref_b64,
-                            }
-                        ]
+                                "data": base64.b64encode(f.read()).decode(),
+                            })
+
+                        # Include previous 1-2 scenes for continuity
+                        for prev_path in self._recent_scene_paths[-2:]:
+                            if prev_path != self._reference_image_path and os.path.exists(prev_path):
+                                with open(prev_path, "rb") as f:
+                                    ref_images.append({
+                                        "type": "base64",
+                                        "media_type": "image/png",
+                                        "data": base64.b64encode(f.read()).decode(),
+                                    })
+
+                        api_params["image"] = ref_images
                     except Exception as ref_e:
-                        print(f"   Warning: Could not attach reference image: {ref_e}")
+                        print(f"   Warning: Could not attach reference images: {ref_e}")
 
                 result = self.openai_client.images.generate(**api_params)
 
@@ -646,6 +659,9 @@ RULES:
                     )
                     if self._character_visual_sheet:
                         print(f"   Character sheet extracted ({len(self._character_visual_sheet)} chars)")
+
+                # Track recent scene paths for continuity references
+                self._recent_scene_paths.append(output_path)
 
                 return output_path
 
