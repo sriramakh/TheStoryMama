@@ -915,7 +915,7 @@ h1 { color: #654321; margin-bottom: 8px; }
       <div class="caption-box" id="igCaption">
         <div class="caption-header">
           <span class="caption-label">Instagram</span>
-          <button class="btn-copy" onclick="copyCaption('igCaptionText')">Copy</button>
+          <button class="btn-copy" onclick="copyCaption('igCaptionText', this)">Copy</button>
         </div>
         <pre class="caption-text" id="igCaptionText"></pre>
       </div>
@@ -923,7 +923,7 @@ h1 { color: #654321; margin-bottom: 8px; }
       <div class="caption-box" id="ytTitle">
         <div class="caption-header">
           <span class="caption-label">YouTube Title</span>
-          <button class="btn-copy" onclick="copyCaption('ytTitleText')">Copy</button>
+          <button class="btn-copy" onclick="copyCaption('ytTitleText', this)">Copy</button>
         </div>
         <pre class="caption-text" id="ytTitleText"></pre>
       </div>
@@ -931,7 +931,7 @@ h1 { color: #654321; margin-bottom: 8px; }
       <div class="caption-box" id="ytDesc">
         <div class="caption-header">
           <span class="caption-label">YouTube Description</span>
-          <button class="btn-copy" onclick="copyCaption('ytDescText')">Copy</button>
+          <button class="btn-copy" onclick="copyCaption('ytDescText', this)">Copy</button>
         </div>
         <pre class="caption-text" id="ytDescText"></pre>
       </div>
@@ -939,7 +939,7 @@ h1 { color: #654321; margin-bottom: 8px; }
       <div class="caption-box" id="pinDesc">
         <div class="caption-header">
           <span class="caption-label">Pinterest</span>
-          <button class="btn-copy" onclick="copyCaption('pinDescText')">Copy</button>
+          <button class="btn-copy" onclick="copyCaption('pinDescText', this)">Copy</button>
         </div>
         <pre class="caption-text" id="pinDescText"></pre>
       </div>
@@ -1099,14 +1099,20 @@ function showCaptions(captions) {
   document.getElementById('pinDescText').textContent = captions.pinterest_description || '';
 }
 
-function copyCaption(elementId) {
+function copyCaption(elementId, btn) {
   const text = document.getElementById(elementId).textContent;
-  navigator.clipboard.writeText(text).then(() => {
-    const btn = event.target;
-    btn.textContent = 'Copied!';
-    btn.style.background = '#D4F5E9';
-    setTimeout(() => { btn.textContent = 'Copy'; btn.style.background = 'white'; }, 2000);
-  });
+  // Fallback for HTTP (clipboard API requires HTTPS)
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand('copy');
+  document.body.removeChild(textarea);
+  btn.textContent = 'Copied!';
+  btn.style.background = '#D4F5E9';
+  setTimeout(() => { btn.textContent = 'Copy'; btn.style.background = 'white'; }, 2000);
 }
 
 function pollJob(jobId) {
