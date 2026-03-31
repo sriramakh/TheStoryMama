@@ -431,6 +431,16 @@ def _generate_reel_impl(req: ReelRequest, job_id: str):
 
     if os.path.exists(out):
         mb = os.path.getsize(out) / (1024 * 1024)
+
+        # Generate social media captions
+        jobs[job_id] = {"status": "running", "progress": 92, "message": "Writing captions...", "result": None}
+        captions = _generate_captions(story)
+
+        # Save captions alongside the reel
+        caption_path = os.path.join(REELS_DIR, f"{reel_id}_captions.json")
+        with open(caption_path, "w") as f:
+            json.dump(captions, f, indent=2)
+
         jobs[job_id] = {
             "status": "done",
             "progress": 100,
@@ -440,10 +450,60 @@ def _generate_reel_impl(req: ReelRequest, job_id: str):
                 "filename": f"{reel_id}.mp4",
                 "size_mb": round(mb, 1),
                 "duration": round(total_vid, 1),
+                "captions": captions,
             },
         }
     else:
         raise Exception("Failed to generate reel")
+
+
+def _generate_captions(story: dict) -> dict:
+    """Generate Instagram and YouTube captions using GPT-4o-mini."""
+    title = story.get("title", "")
+    moral = story.get("moral", "")
+    characters = ", ".join(c["name"] for c in story.get("characters", []))
+    scene_texts = " ".join(s["text"] for s in story.get("scenes", [])[:3])
+
+    prompt = f"""You are a social media expert for a children's bedtime story brand called TheStoryMama.
+
+Generate captions for Instagram Reels and YouTube Shorts for this story:
+
+STORY: {title}
+CHARACTERS: {characters}
+MORAL: {moral or 'None'}
+OPENING: {scene_texts}
+
+Return JSON with these fields:
+{{
+  "instagram_caption": "Instagram caption (2-3 engaging lines + call to action + 15-20 relevant hashtags). Make it warm, relatable to parents. Include 'Read the full story free — link in bio' as CTA. Use emojis sparingly (2-3 max).",
+  "youtube_title": "YouTube video title (under 60 chars, SEO-friendly, includes 'Bedtime Story' or 'Kids Story')",
+  "youtube_description": "YouTube description (3-4 lines: story hook, what kids will love about it, CTA to visit thestorymama.club, 5-8 relevant tags)",
+  "pinterest_description": "Pinterest pin description (2-3 SEO-rich sentences for the story, include keywords: bedtime story, toddler, free, illustrated)"
+}}
+
+Make each caption unique and compelling. Parents should want to stop scrolling and watch."""
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=800,
+        )
+
+        raw = response.choices[0].message.content.strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        start = raw.find("{")
+        end = raw.rfind("}") + 1
+        return json.loads(raw[start:end])
+    except Exception as e:
+        print(f"Caption generation failed: {e}")
+        return {
+            "instagram_caption": f"{title}\n\nRead the full story free — link in bio\n\n#bedtimestories #toddlermom #kidsstories #storytime",
+            "youtube_title": f"{title} — Free Bedtime Story for Kids",
+            "youtube_description": f"Watch {title}, a beautiful illustrated bedtime story. Read free at thestorymama.club",
+            "pinterest_description": f"{title} — A free illustrated bedtime story for toddlers. Read at thestorymama.club",
+        }
 
 
 # ── QC / Correction API ──────────────────────────────────────────────────────
@@ -751,6 +811,12 @@ h1 { color: #654321; margin-bottom: 8px; }
 .tts-status .ready { color: #2D5F4A; }
 
 .scene-preview { display: flex; gap: 8px; overflow-x: auto; padding: 10px 0; max-width: 100%; }
+.caption-box { background: #FFF9EB; border-radius: 10px; padding: 14px; margin-bottom: 10px; }
+.caption-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.caption-label { font-size: 13px; font-weight: 600; color: #654321; }
+.btn-copy { font-size: 12px; padding: 4px 12px; border: 1px solid #EDE5D8; border-radius: 8px; background: white; cursor: pointer; color: #654321; }
+.btn-copy:hover { background: #D4F5E9; }
+.caption-text { font-size: 13px; color: #4A3728; white-space: pre-wrap; word-wrap: break-word; font-family: inherit; margin: 0; line-height: 1.5; background: none; border: none; }
 .scene-preview img { height: 280px; border-radius: 8px; flex-shrink: 0; cursor: pointer; transition: transform 0.15s; }
 .scene-preview img:hover { transform: scale(1.05); }
 .panel { min-width: 0; overflow: hidden; }
@@ -834,6 +900,42 @@ h1 { color: #654321; margin-bottom: 8px; }
 
     <div class="preview-area" id="previewArea" style="display:none;">
       <video id="videoPlayer" controls></video>
+    </div>
+
+    <div id="captionsArea" style="display:none; margin-top:20px;">
+      <h3 style="font-size:16px; color:#654321; margin-bottom:12px;">Social Media Captions</h3>
+
+      <div class="caption-box" id="igCaption">
+        <div class="caption-header">
+          <span class="caption-label">Instagram</span>
+          <button class="btn-copy" onclick="copyCaption('igCaptionText')">Copy</button>
+        </div>
+        <pre class="caption-text" id="igCaptionText"></pre>
+      </div>
+
+      <div class="caption-box" id="ytTitle">
+        <div class="caption-header">
+          <span class="caption-label">YouTube Title</span>
+          <button class="btn-copy" onclick="copyCaption('ytTitleText')">Copy</button>
+        </div>
+        <pre class="caption-text" id="ytTitleText"></pre>
+      </div>
+
+      <div class="caption-box" id="ytDesc">
+        <div class="caption-header">
+          <span class="caption-label">YouTube Description</span>
+          <button class="btn-copy" onclick="copyCaption('ytDescText')">Copy</button>
+        </div>
+        <pre class="caption-text" id="ytDescText"></pre>
+      </div>
+
+      <div class="caption-box" id="pinDesc">
+        <div class="caption-header">
+          <span class="caption-label">Pinterest</span>
+          <button class="btn-copy" onclick="copyCaption('pinDescText')">Copy</button>
+        </div>
+        <pre class="caption-text" id="pinDescText"></pre>
+      </div>
     </div>
   </div>
 </div>
@@ -978,6 +1080,24 @@ function updateProgress(pct, msg) {
   document.getElementById('progressText').textContent = msg;
 }
 
+function showCaptions(captions) {
+  document.getElementById('captionsArea').style.display = 'block';
+  document.getElementById('igCaptionText').textContent = captions.instagram_caption || '';
+  document.getElementById('ytTitleText').textContent = captions.youtube_title || '';
+  document.getElementById('ytDescText').textContent = captions.youtube_description || '';
+  document.getElementById('pinDescText').textContent = captions.pinterest_description || '';
+}
+
+function copyCaption(elementId) {
+  const text = document.getElementById(elementId).textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = event.target;
+    btn.textContent = 'Copied!';
+    btn.style.background = '#D4F5E9';
+    setTimeout(() => { btn.textContent = 'Copy'; btn.style.background = 'white'; }, 2000);
+  });
+}
+
 function pollJob(jobId) {
   fetch('/api/job/' + jobId)
     .then(r => r.json())
@@ -996,6 +1116,11 @@ function pollJob(jobId) {
         document.getElementById('generateBtn').disabled = false;
         document.getElementById('generateBtn').textContent = 'Generate Reel';
         setTimeout(() => { document.getElementById('progressContainer').style.display = 'none'; }, 2000);
+
+        // Show captions
+        if (data.result.captions) {
+          showCaptions(data.result.captions);
+        }
       } else if (data.status === 'failed') {
         setStatus('Failed: ' + data.message, 'error');
         document.getElementById('generateBtn').disabled = false;
