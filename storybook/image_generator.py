@@ -571,11 +571,17 @@ IMPORTANT — CHARACTER VISUAL REFERENCE (how each character ACTUALLY looks — 
                 for c in scene_chars
             )
 
+            # Build exclude list
+            absent_names = [c["name"] for c in absent_chars]
+            exclude_rule = ""
+            if absent_names:
+                exclude_rule = f"\n- DO NOT draw these characters (they are NOT in this scene): {', '.join(absent_names)}"
+
             prompt = f"""{style['description']}
 
 The attached images are PREVIOUS SCENES from this storybook. Match the character designs EXACTLY — same species, face, skin/fur color, clothing, proportions.
 
-{sheet_section}CHARACTERS IN THIS SCENE — draw ONLY these characters, matching their appearance from the reference images:
+{sheet_section}INCLUDE — draw ONLY these characters, matching their appearance from the reference images:
 {present_block}
 
 BACKGROUND: {background}
@@ -587,7 +593,7 @@ SCENE {scene['scene_number']} of {len(scenes)}:
 
 RULES:
 - {style['image_rules']}
-- Draw EXACTLY {num_chars_in_scene} characters in this scene — no more, no less
+- Draw EXACTLY {num_chars_in_scene} characters in this scene — no more, no less{exclude_rule}
 - Every character MUST look IDENTICAL to the reference images — same species, same face, same skin/fur color, same clothing, same accessories
 - Warm, friendly expressions appropriate for a children's book
 - Suitable for a 2-4 year old child
@@ -934,73 +940,42 @@ Respond ONLY with JSON: {{"confidence": 0.85, "reason": "short note"}}"""
         image_scene_pairs = list(zip(image_paths, story["scenes"]))
         scores = self._review_images(image_scene_pairs, story["characters"])
 
-        # ── Phase 3: Regenerate low-confidence images with Gemini ──
-        low_confidence = [
-            (i, scene)
-            for i, scene in enumerate(story["scenes"])
-            if scores.get(scene["scene_number"], 1.0) < self.CONFIDENCE_THRESHOLD
-        ]
-
-        if low_confidence:
-            print(f"\n   {len(low_confidence)} scene(s) below confidence threshold — regenerating with Gemini...")
-
-        for idx, scene in low_confidence:
-            scene_num = scene["scene_number"]
-
-            if progress_callback:
-                progress_callback(scene_num, total, "regenerating")
-
-            try:
-                output_path = image_paths[idx]
-                self._regenerate_with_gemini(
-                    story=story,
-                    scene=scene,
-                    scene_index=idx,
-                    output_path=output_path,
-                    all_image_paths=image_paths,
-                )
-                print(f"   Scene {scene_num}: regenerated with Gemini")
-            except Exception as e:
-                print(f"   Scene {scene_num}: Gemini fallback failed ({e}), keeping original")
-
-        # ── Phase 4: Enhanced QC — character consistency + background accuracy ──
-        # Uses last 2-3 scenes as reference (they tend to be most consistent)
+        # ── Phase 3: Enhanced QC — score only, no auto-regeneration ──
+        # Scores are saved to qc_scores.json for manual review in the QC studio
         if progress_callback:
             progress_callback(1, total, "quality checking")
 
-        image_paths = self._enhanced_qc(story, image_paths, output_dir, progress_callback)
+        self._qc_score_all(story, image_paths, output_dir, progress_callback)
 
         return image_paths
 
-    def _enhanced_qc(
+    def _qc_score_all(
         self,
         story: dict,
         image_paths: list[str],
         output_dir: str,
         progress_callback=None,
-    ) -> list[str]:
+    ) -> None:
         """
-        Enhanced QC: check every scene for character consistency and background accuracy.
-        Uses last 2-3 completed scenes as reference baseline.
-        Threshold: 0.75. Max 5 retries per scene, keeps the best attempt.
+        Score every scene for character consistency and background accuracy.
+        Saves scores to qc_scores.json in the story directory — no auto-regeneration.
+        Low scores can be fixed manually via the QC studio at :8001/qc.
         """
         total = len(story["scenes"])
         characters = story["characters"]
-        QC_THRESHOLD = 0.75
-        MAX_RETRIES = 5
 
         char_block = "\n".join(
             f"- {c['name']} ({c['type']}): {c['description']}"
             for c in characters
         )
 
-        # Build reference from last 2-3 scenes (most consistent by this point)
+        # Build reference from last 2-3 scenes
         ref_indices = list(range(max(0, total - 3), total))
         ref_descriptions = self._extract_reference_from_scenes(
             [image_paths[i] for i in ref_indices], characters
         )
 
-        failed_scenes = []
+        qc_results = []
 
         for i, scene in enumerate(story["scenes"]):
             scene_num = scene["scene_number"]
@@ -1012,64 +987,23 @@ Respond ONLY with JSON: {{"confidence": 0.85, "reason": "short note"}}"""
                 image_paths[i], scene, char_block, ref_descriptions
             )
 
-            if score >= QC_THRESHOLD:
-                print(f"   Scene {scene_num}: QC passed ({score:.2f})")
-                continue
+            status = "passed" if score >= 0.75 else "needs_review"
+            print(f"   Scene {scene_num}: {status} ({score:.2f})")
 
-            # Scene needs correction — retry up to MAX_RETRIES times
-            print(f"   Scene {scene_num}: QC failed ({score:.2f}) — regenerating...")
-            best_score = score
-            best_path = image_paths[i]
+            qc_results.append({
+                "scene_number": scene_num,
+                "score": round(score, 2),
+                "status": status,
+            })
 
-            for attempt in range(MAX_RETRIES):
-                if progress_callback:
-                    progress_callback(scene_num, total, f"retry {attempt + 1}/{MAX_RETRIES}")
+        # Save scores to file for QC studio
+        qc_path = os.path.join(output_dir, "qc_scores.json")
+        with open(qc_path, "w") as f:
+            json.dump({"story": story.get("title", ""), "scores": qc_results}, f, indent=2)
 
-                try:
-                    retry_path = os.path.join(output_dir, f"scene_{scene_num:02d}_retry{attempt}.png")
-                    self.generate_scene_image(story, scene, i, retry_path)
-                    time.sleep(1.5)
-
-                    retry_score = self._qc_score_scene(
-                        retry_path, scene, char_block, ref_descriptions
-                    )
-                    print(f"   Scene {scene_num} retry {attempt + 1}: score={retry_score:.2f}")
-
-                    if retry_score > best_score:
-                        best_score = retry_score
-                        best_path = retry_path
-
-                    if retry_score >= QC_THRESHOLD:
-                        break
-
-                except Exception as e:
-                    print(f"   Scene {scene_num} retry {attempt + 1} failed: {e}")
-
-            # Use the best version
-            original_path = image_paths[i]
-            if best_path != original_path:
-                import shutil
-                shutil.copy2(best_path, original_path)
-                print(f"   Scene {scene_num}: using best attempt (score={best_score:.2f})")
-            else:
-                print(f"   Scene {scene_num}: keeping original (best score={best_score:.2f})")
-
-            # Clean up retry files
-            for attempt in range(MAX_RETRIES):
-                retry_path = os.path.join(output_dir, f"scene_{scene_num:02d}_retry{attempt}.png")
-                if os.path.exists(retry_path) and retry_path != best_path:
-                    os.remove(retry_path)
-
-            if best_score < QC_THRESHOLD:
-                failed_scenes.append((scene_num, best_score))
-
-        if failed_scenes:
-            print(f"\n   QC: {len(failed_scenes)} scene(s) below threshold after retries: "
-                  f"{[(s, f'{sc:.2f}') for s, sc in failed_scenes]}")
-        else:
-            print(f"\n   QC: All scenes passed!")
-
-        return image_paths
+        passed = sum(1 for r in qc_results if r["status"] == "passed")
+        needs_review = sum(1 for r in qc_results if r["status"] == "needs_review")
+        print(f"\n   QC: {passed} passed, {needs_review} need review (scores saved to qc_scores.json)")
 
     def _extract_reference_from_scenes(
         self, ref_image_paths: list[str], characters: list[dict]

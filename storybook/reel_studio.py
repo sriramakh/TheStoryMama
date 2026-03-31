@@ -462,6 +462,15 @@ def get_story_details(story_id: str):
         raise HTTPException(404, "Story not found")
     with open(story_path) as f:
         story = json.load(f)
+    # Load QC scores if available
+    qc_scores = {}
+    qc_path = os.path.join(STORIES_DIR, story_id, "qc_scores.json")
+    if os.path.exists(qc_path):
+        with open(qc_path) as f:
+            qc_data = json.load(f)
+            for s in qc_data.get("scores", []):
+                qc_scores[s["scene_number"]] = s
+
     return {
         "id": story_id,
         "title": story.get("title"),
@@ -473,6 +482,8 @@ def get_story_details(story_id: str):
                 "image_description": s.get("image_description", ""),
                 "background": s.get("background", ""),
                 "image_url": f"/api/stories/{story_id}/image/{s['scene_number']}",
+                "qc_score": qc_scores.get(s["scene_number"], {}).get("score"),
+                "qc_status": qc_scores.get(s["scene_number"], {}).get("status"),
             }
             for s in story.get("scenes", [])
         ],
@@ -1024,6 +1035,7 @@ a { color: #E8829A; }
 .scene-card { background: white; border-radius: 14px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.06); cursor: pointer; transition: all 0.15s; }
 .scene-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.12); transform: translateY(-2px); }
 .scene-card.selected { ring: 3px solid #E8829A; outline: 3px solid #E8829A; }
+.scene-card.needs-review { border: 2px solid #C94B4B; }
 .scene-card img { width: 100%; display: block; }
 .scene-card .info { padding: 10px 12px; }
 .scene-card .info .num { font-size: 11px; color: #8B7D6B; font-weight: 600; }
@@ -1144,15 +1156,24 @@ function loadStory(id) {
 
 function renderScenes() {
   const grid = document.getElementById('sceneGrid');
-  grid.innerHTML = storyData.scenes.map(s => `
-    <div class="scene-card" id="sc-${s.scene_number}" onclick="selectScene(${s.scene_number})">
+  grid.innerHTML = storyData.scenes.map(s => {
+    const score = s.qc_score;
+    const hasScore = score !== null && score !== undefined;
+    const scoreColor = !hasScore ? '#8B7D6B' : score >= 0.75 ? '#2D5F4A' : '#C94B4B';
+    const scoreBg = !hasScore ? '#EDE5D8' : score >= 0.75 ? '#D4F5E9' : '#FFE0E0';
+    const scoreLabel = !hasScore ? 'No QC' : score.toFixed(2);
+    return `
+    <div class="scene-card ${s.qc_status === 'needs_review' ? 'needs-review' : ''}" id="sc-${s.scene_number}" onclick="selectScene(${s.scene_number})">
       <img src="${s.image_url}?t=${Date.now()}" loading="lazy">
       <div class="info">
-        <div class="num">Scene ${s.scene_number}</div>
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div class="num">Scene ${s.scene_number}</div>
+          <span style="font-size:11px; font-weight:600; padding:2px 8px; border-radius:6px; background:${scoreBg}; color:${scoreColor};">${scoreLabel}</span>
+        </div>
         <div class="text">${s.text}</div>
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
 function selectScene(num) {
