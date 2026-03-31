@@ -617,34 +617,36 @@ RULES:
                     "quality": "medium",
                 }
 
-                # For scenes 2+: pass scene 1 + previous scene images as reference
-                if scene_index > 0 and self._reference_image_path:
-                    try:
-                        ref_images = []
+                # For scenes 2+: use images.edit() with reference images
+                use_edit = scene_index > 0 and self._reference_image_path
+                ref_images = []
 
+                if use_edit:
+                    try:
                         # Always include scene 1 (character anchor)
-                        with open(self._reference_image_path, "rb") as f:
-                            ref_images.append({
-                                "type": "base64",
-                                "media_type": "image/png",
-                                "data": base64.b64encode(f.read()).decode(),
-                            })
+                        ref_images.append(open(self._reference_image_path, "rb"))
 
                         # Include previous 1-2 scenes for continuity
                         for prev_path in self._recent_scene_paths[-2:]:
                             if prev_path != self._reference_image_path and os.path.exists(prev_path):
-                                with open(prev_path, "rb") as f:
-                                    ref_images.append({
-                                        "type": "base64",
-                                        "media_type": "image/png",
-                                        "data": base64.b64encode(f.read()).decode(),
-                                    })
-
-                        api_params["image"] = ref_images
+                                ref_images.append(open(prev_path, "rb"))
                     except Exception as ref_e:
-                        print(f"   Warning: Could not attach reference images: {ref_e}")
+                        print(f"   Warning: Could not load reference images: {ref_e}")
+                        use_edit = False
 
-                result = self.openai_client.images.generate(**api_params)
+                if use_edit and ref_images:
+                    result = self.openai_client.images.edit(
+                        model="gpt-image-1-mini",
+                        image=ref_images,
+                        prompt=prompt,
+                        size=self.size,
+                        quality="medium",
+                    )
+                    # Close file handles
+                    for fh in ref_images:
+                        fh.close()
+                else:
+                    result = self.openai_client.images.generate(**api_params)
 
                 image_bytes = base64.b64decode(result.data[0].b64_json)
                 with open(output_path, "wb") as f:
