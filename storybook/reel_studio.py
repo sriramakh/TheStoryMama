@@ -176,6 +176,7 @@ class ReelRequest(BaseModel):
     bgm: str = "Joyful"
     tts_volume: float = 1.05
     bgm_volume: float = 0.097
+    tts_tempo: float = 0.9  # 0.7=slow, 1.0=normal, 0.9=default
     include_intro: bool = True
     include_outro: bool = True
 
@@ -300,7 +301,7 @@ def _generate_reel_impl(req: ReelRequest, job_id: str):
     for sc in scenes:
         sn = sc["scene_number"]
         tp = os.path.join(tts_dir, f"scene_{sn:02d}.mp3")
-        dur = max(4.0, get_dur(tp) / 0.9 + 0.5)
+        dur = max(4.0, get_dur(tp) / req.tts_tempo + 0.5)
         ip = os.path.join(STORIES_DIR, req.story_id, f"scene_{sn:02d}.jpg")
         if not os.path.exists(ip):
             ip = os.path.join(STORIES_DIR, req.story_id, f"scene_{sn:02d}_web.jpg")
@@ -395,7 +396,7 @@ def _generate_reel_impl(req: ReelRequest, job_id: str):
     for i, sd in enumerate(sdata):
         inputs_a.extend(["-i", sd["tts"]])
         ms = int(t * 1000)
-        af.append(f"[{i}:a]aformat=channel_layouts=mono,atempo=0.9,volume={req.tts_volume},adelay={ms}|{ms}[a{i}]")
+        af.append(f"[{i}:a]aformat=channel_layouts=mono,atempo={req.tts_tempo},volume={req.tts_volume},adelay={ms}|{ms}[a{i}]")
         t += sd["dur"] - tr
 
     amix = "".join(f"[a{i}]" for i in range(n))
@@ -865,6 +866,12 @@ h1 { color: #654321; margin-bottom: 8px; }
         <span id="ttsVolVal">1.05</span>
       </div>
 
+      <label>Voice Speed</label>
+      <div class="slider-row">
+        <input type="range" id="ttsTempo" min="0.7" max="1.0" step="0.05" value="0.9">
+        <span id="ttsTempoVal">0.9x</span>
+      </div>
+
       <label>BGM Volume</label>
       <div class="slider-row">
         <input type="range" id="bgmVol" min="0.01" max="0.5" step="0.005" value="0.097">
@@ -1018,6 +1025,9 @@ function pregenTTS() {
 document.getElementById('ttsVol').addEventListener('input', e => {
   document.getElementById('ttsVolVal').textContent = e.target.value;
 });
+document.getElementById('ttsTempo').addEventListener('input', e => {
+  document.getElementById('ttsTempoVal').textContent = e.target.value + 'x';
+});
 document.getElementById('bgmVol').addEventListener('input', e => {
   document.getElementById('bgmVolVal').textContent = e.target.value;
 });
@@ -1045,6 +1055,7 @@ function generateReel() {
     voice: document.getElementById('voice').value,
     bgm: document.getElementById('bgm').value,
     tts_volume: parseFloat(document.getElementById('ttsVol').value),
+    tts_tempo: parseFloat(document.getElementById('ttsTempo').value),
     bgm_volume: parseFloat(document.getElementById('bgmVol').value),
     include_intro: document.getElementById('introCheck').checked,
     include_outro: document.getElementById('outroCheck').checked,
