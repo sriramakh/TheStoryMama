@@ -5,7 +5,8 @@ import json
 import re
 from collections import Counter
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, HTTPException
+from pydantic import BaseModel
 
 import sys
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -15,6 +16,78 @@ if _ROOT not in sys.path:
 from config import Config
 
 router = APIRouter(prefix="/api/v1/library", tags=["library"])
+
+# ── Story visibility & featured config (persisted to disk) ────────────────────
+
+STORY_CONFIG_PATH = os.path.join(Config.OUTPUT_DIR, "story_config.json")
+
+
+def _load_story_config() -> dict:
+    if os.path.exists(STORY_CONFIG_PATH):
+        try:
+            with open(STORY_CONFIG_PATH, "r") as f:
+                return json.load(f)
+        except:
+            pass
+    return {"hidden": [], "featured": []}
+
+
+def _save_story_config(config: dict):
+    with open(STORY_CONFIG_PATH, "w") as f:
+        json.dump(config, f, indent=2)
+
+
+class StoryVisibilityRequest(BaseModel):
+    story_id: str
+
+
+@router.post("/hide")
+def hide_story(req: StoryVisibilityRequest):
+    """Hide a story from the public website."""
+    config = _load_story_config()
+    if req.story_id not in config["hidden"]:
+        config["hidden"].append(req.story_id)
+    # Also remove from featured if present
+    if req.story_id in config.get("featured", []):
+        config["featured"].remove(req.story_id)
+    _save_story_config(config)
+    return {"hidden": True, "story_id": req.story_id}
+
+
+@router.post("/show")
+def show_story(req: StoryVisibilityRequest):
+    """Show a previously hidden story on the public website."""
+    config = _load_story_config()
+    if req.story_id in config["hidden"]:
+        config["hidden"].remove(req.story_id)
+    _save_story_config(config)
+    return {"shown": True, "story_id": req.story_id}
+
+
+@router.post("/feature")
+def feature_story(req: StoryVisibilityRequest):
+    """Add a story to the featured list on the homepage."""
+    config = _load_story_config()
+    if req.story_id not in config.get("featured", []):
+        config.setdefault("featured", []).append(req.story_id)
+    _save_story_config(config)
+    return {"featured": True, "story_id": req.story_id}
+
+
+@router.post("/unfeature")
+def unfeature_story(req: StoryVisibilityRequest):
+    """Remove a story from the featured list."""
+    config = _load_story_config()
+    if req.story_id in config.get("featured", []):
+        config["featured"].remove(req.story_id)
+    _save_story_config(config)
+    return {"unfeatured": True, "story_id": req.story_id}
+
+
+@router.get("/config")
+def get_story_config():
+    """Get current hidden/featured configuration."""
+    return _load_story_config()
 
 # ── Category definitions with weighted keyword groups ─────────────────────────
 # Each category has "strong" keywords (worth 3 points) and "weak" keywords (1 point).
@@ -270,6 +343,11 @@ def list_library_stories(
     """Browse the public story library with filters."""
     all_stories = _load_all_stories()
 
+    # Exclude hidden stories
+    config = _load_story_config()
+    hidden = set(config.get("hidden", []))
+    all_stories = [s for s in all_stories if s["id"] not in hidden]
+
     # Apply filters
     filtered = all_stories
     if category:
@@ -302,6 +380,8 @@ def list_library_stories(
 def list_categories():
     """List categories with story counts (a story can appear in multiple categories)."""
     all_stories = _load_all_stories()
+    hidden = set(_load_story_config().get("hidden", []))
+    all_stories = [s for s in all_stories if s["id"] not in hidden]
     counts = Counter()
     for s in all_stories:
         for cat in s.get("categories", []):
@@ -316,26 +396,31 @@ def list_categories():
 
 @router.get("/featured")
 def featured_stories():
-    """Return hand-picked featured stories for the homepage."""
+    """Return featured stories from config, fallback to defaults."""
     all_stories = _load_all_stories()
+    config = _load_story_config()
+    hidden = set(config.get("hidden", []))
 
-    # Curated list of best stories — update this as new great stories are added
-    FEATURED_IDS = [
-        "118_Puffs_Magical_Bubble_Adventure",
-        "128_Ella_and_the_Magical_Puddle",
-        "132_The_Melodic_Garden",
-        "133_Pandas_Perfect_Roll",
-        "135_The_Butterfly_Dreamers",
-        "137_Ants_on_a_Cupcake_Adventure",
-    ]
+    featured_ids = config.get("featured", [])
+
+    # Fallback defaults if no featured configured
+    if not featured_ids:
+        featured_ids = [
+            "118_Puffs_Magical_Bubble_Adventure",
+            "128_Ella_and_the_Magical_Puddle",
+            "132_The_Melodic_Garden",
+            "133_Pandas_Perfect_Roll",
+            "135_The_Butterfly_Dreamers",
+            "137_Ants_on_a_Cupcake_Adventure",
+        ]
 
     story_map = {s["id"]: s for s in all_stories}
-    featured = [story_map[sid] for sid in FEATURED_IDS if sid in story_map]
+    featured = [story_map[sid] for sid in featured_ids if sid in story_map and sid not in hidden]
 
-    # Fill if any curated stories are missing
+    # Fill if less than 6
     if len(featured) < 6:
         for s in all_stories:
-            if s not in featured and len(featured) < 6:
+            if s not in featured and s["id"] not in hidden and len(featured) < 6:
                 featured.append(s)
 
     return {"stories": featured}

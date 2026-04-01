@@ -885,7 +885,13 @@ h1 { color: #654321; margin-bottom: 8px; }
   <!-- Right: Controls + Preview -->
   <div class="panel">
     <h2>Reel Settings</h2>
-    <div id="selectedStory" style="font-size:14px; color:#8B7D6B; margin-bottom:10px;">No story selected</div>
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+      <div id="selectedStory" style="font-size:14px; color:#8B7D6B;">No story selected</div>
+      <div id="storyActions" style="display:none; flex-shrink:0;">
+        <button class="btn" id="btnToggleVisibility" onclick="toggleVisibility()" style="font-size:11px; padding:5px 12px; background:#FFE0E0; color:#C94B4B;">Hide from Website</button>
+        <button class="btn" id="btnToggleFeatured" onclick="toggleFeatured()" style="font-size:11px; padding:5px 12px; background:#FFF3E0; color:#8B6914;">Add to Featured</button>
+      </div>
+    </div>
     <div class="scene-preview" id="scenePreview"></div>
 
     <div class="controls">
@@ -1051,6 +1057,10 @@ function selectStory(id) {
   // Check TTS status
   checkTTSStatus(id);
 
+  // Show action buttons and check visibility/featured status
+  document.getElementById('storyActions').style.display = 'flex';
+  updateStoryActions(id);
+
   // Check for cached reel
   fetch('/api/reel-cache/' + id).then(r => r.json()).then(data => {
     if (data.cached && data.result) {
@@ -1193,6 +1203,62 @@ function copyCaption(elementId, btn) {
   btn.textContent = 'Copied!';
   btn.style.background = '#D4F5E9';
   setTimeout(() => { btn.textContent = 'Copy'; btn.style.background = 'white'; }, 2000);
+}
+
+let storyConfig = { hidden: [], featured: [] };
+
+function updateStoryActions(id) {
+  fetch('/api/stories/' + id + '/config').then(r => {
+    if (!r.ok) {
+      // Endpoint might not exist on studio, fetch from main API
+      return fetch('https://api.thestorymama.club/api/v1/library/config').then(r2 => r2.json());
+    }
+    return r.json();
+  }).then(cfg => {
+    storyConfig = cfg;
+    const isHidden = (cfg.hidden || []).includes(id);
+    const isFeatured = (cfg.featured || []).includes(id);
+
+    const btnVis = document.getElementById('btnToggleVisibility');
+    btnVis.textContent = isHidden ? 'Show on Website' : 'Hide from Website';
+    btnVis.style.background = isHidden ? '#D4F5E9' : '#FFE0E0';
+    btnVis.style.color = isHidden ? '#2D5F4A' : '#C94B4B';
+
+    const btnFeat = document.getElementById('btnToggleFeatured');
+    btnFeat.textContent = isFeatured ? 'Remove from Featured' : 'Add to Featured';
+    btnFeat.style.background = isFeatured ? '#FFE0E0' : '#FFF3E0';
+    btnFeat.style.color = isFeatured ? '#C94B4B' : '#8B6914';
+  }).catch(() => {});
+}
+
+function toggleVisibility() {
+  if (!selectedStory) return;
+  const isHidden = (storyConfig.hidden || []).includes(selectedStory.id);
+  const endpoint = isHidden ? '/library/show' : '/library/hide';
+
+  fetch('https://api.thestorymama.club/api/v1' + endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ story_id: selectedStory.id }),
+  }).then(r => r.json()).then(() => {
+    updateStoryActions(selectedStory.id);
+    setStatus(isHidden ? 'Story is now visible on website' : 'Story hidden from website', 'success');
+  }).catch(e => setStatus('Error: ' + e.message, 'error'));
+}
+
+function toggleFeatured() {
+  if (!selectedStory) return;
+  const isFeatured = (storyConfig.featured || []).includes(selectedStory.id);
+  const endpoint = isFeatured ? '/library/unfeature' : '/library/feature';
+
+  fetch('https://api.thestorymama.club/api/v1' + endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ story_id: selectedStory.id }),
+  }).then(r => r.json()).then(() => {
+    updateStoryActions(selectedStory.id);
+    setStatus(isFeatured ? 'Removed from featured' : 'Added to featured on homepage', 'success');
+  }).catch(e => setStatus('Error: ' + e.message, 'error'));
 }
 
 function pollJob(jobId) {
