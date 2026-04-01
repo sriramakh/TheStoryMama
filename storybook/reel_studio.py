@@ -553,6 +553,73 @@ IMPORTANT: Follow the templates exactly. Keep the consistent brand voice — war
         }
 
 
+# ── Story Visibility / Featured API (proxy to avoid CORS) ────────────────────
+
+STORY_CONFIG_PATH = os.path.join(STORIES_DIR, "story_config.json")
+
+
+def _load_story_config() -> dict:
+    if os.path.exists(STORY_CONFIG_PATH):
+        try:
+            with open(STORY_CONFIG_PATH, "r") as f:
+                return json.load(f)
+        except:
+            pass
+    return {"hidden": [], "featured": []}
+
+
+def _save_story_config(config: dict):
+    with open(STORY_CONFIG_PATH, "w") as f:
+        json.dump(config, f, indent=2)
+
+
+class StoryActionRequest(BaseModel):
+    story_id: str
+
+
+@app.get("/api/story-config")
+def get_story_config():
+    return _load_story_config()
+
+
+@app.post("/api/hide-story")
+def hide_story(req: StoryActionRequest):
+    config = _load_story_config()
+    if req.story_id not in config["hidden"]:
+        config["hidden"].append(req.story_id)
+    if req.story_id in config.get("featured", []):
+        config["featured"].remove(req.story_id)
+    _save_story_config(config)
+    return {"ok": True, "action": "hidden"}
+
+
+@app.post("/api/show-story")
+def show_story(req: StoryActionRequest):
+    config = _load_story_config()
+    if req.story_id in config["hidden"]:
+        config["hidden"].remove(req.story_id)
+    _save_story_config(config)
+    return {"ok": True, "action": "shown"}
+
+
+@app.post("/api/feature-story")
+def feature_story(req: StoryActionRequest):
+    config = _load_story_config()
+    if req.story_id not in config.get("featured", []):
+        config.setdefault("featured", []).append(req.story_id)
+    _save_story_config(config)
+    return {"ok": True, "action": "featured"}
+
+
+@app.post("/api/unfeature-story")
+def unfeature_story(req: StoryActionRequest):
+    config = _load_story_config()
+    if req.story_id in config.get("featured", []):
+        config["featured"].remove(req.story_id)
+    _save_story_config(config)
+    return {"ok": True, "action": "unfeatured"}
+
+
 # ── QC / Correction API ──────────────────────────────────────────────────────
 
 class CorrectionRequest(BaseModel):
@@ -1208,13 +1275,7 @@ function copyCaption(elementId, btn) {
 let storyConfig = { hidden: [], featured: [] };
 
 function updateStoryActions(id) {
-  fetch('/api/stories/' + id + '/config').then(r => {
-    if (!r.ok) {
-      // Endpoint might not exist on studio, fetch from main API
-      return fetch('https://api.thestorymama.club/api/v1/library/config').then(r2 => r2.json());
-    }
-    return r.json();
-  }).then(cfg => {
+  fetch('/api/story-config').then(r => r.json()).then(cfg => {
     storyConfig = cfg;
     const isHidden = (cfg.hidden || []).includes(id);
     const isFeatured = (cfg.featured || []).includes(id);
@@ -1234,9 +1295,9 @@ function updateStoryActions(id) {
 function toggleVisibility() {
   if (!selectedStory) return;
   const isHidden = (storyConfig.hidden || []).includes(selectedStory.id);
-  const endpoint = isHidden ? '/library/show' : '/library/hide';
+  const endpoint = isHidden ? '/api/show-story' : '/api/hide-story';
 
-  fetch('https://api.thestorymama.club/api/v1' + endpoint, {
+  fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ story_id: selectedStory.id }),
@@ -1249,9 +1310,9 @@ function toggleVisibility() {
 function toggleFeatured() {
   if (!selectedStory) return;
   const isFeatured = (storyConfig.featured || []).includes(selectedStory.id);
-  const endpoint = isFeatured ? '/library/unfeature' : '/library/feature';
+  const endpoint = isFeatured ? '/api/unfeature-story' : '/api/feature-story';
 
-  fetch('https://api.thestorymama.club/api/v1' + endpoint, {
+  fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ story_id: selectedStory.id }),
