@@ -27,7 +27,26 @@ from PIL import Image, ImageDraw, ImageFont
 jobs: dict[str, dict] = {}  # job_id -> {status, progress, message, result}
 
 # Cache: story_id -> latest reel result (video url, captions, settings)
-reel_cache: dict[str, dict] = {}
+REEL_CACHE_FILE = "reel_studio_cache/reel_cache.json"
+
+
+def _load_reel_cache() -> dict:
+    if os.path.exists(REEL_CACHE_FILE):
+        try:
+            with open(REEL_CACHE_FILE, "r") as f:
+                return json.load(f)
+        except:
+            pass
+    return {}
+
+
+def _save_reel_cache(cache: dict):
+    os.makedirs(os.path.dirname(REEL_CACHE_FILE), exist_ok=True)
+    with open(REEL_CACHE_FILE, "w") as f:
+        json.dump(cache, f, indent=2)
+
+
+reel_cache: dict[str, dict] = _load_reel_cache()
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
@@ -467,8 +486,9 @@ def _generate_reel_impl(req: ReelRequest, job_id: str):
             "tts_tempo": req.tts_tempo,
         }
 
-        # Cache the result for this story
+        # Cache the result for this story (persisted to disk)
         reel_cache[req.story_id] = result_data
+        _save_reel_cache(reel_cache)
 
         jobs[job_id] = {
             "status": "done",
