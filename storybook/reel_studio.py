@@ -26,6 +26,9 @@ from PIL import Image, ImageDraw, ImageFont
 # Job progress tracking
 jobs: dict[str, dict] = {}  # job_id -> {status, progress, message, result}
 
+# Cache: story_id -> latest reel result (video url, captions, settings)
+reel_cache: dict[str, dict] = {}
+
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 from config import Config
@@ -252,6 +255,15 @@ def get_job_status(job_id: str):
     return job
 
 
+@app.get("/api/reel-cache/{story_id}")
+def get_reel_cache(story_id: str):
+    """Get cached reel result for a story (if exists)."""
+    cached = reel_cache.get(story_id)
+    if not cached:
+        return {"cached": False}
+    return {"cached": True, "result": cached}
+
+
 @app.post("/api/generate-reel")
 def api_generate_reel(req: ReelRequest):
     """Start reel generation in background, return job_id for polling."""
@@ -442,17 +454,27 @@ def _generate_reel_impl(req: ReelRequest, job_id: str):
         with open(caption_path, "w") as f:
             json.dump(captions, f, indent=2)
 
+        result_data = {
+            "url": f"/reels/{reel_id}.mp4",
+            "filename": f"{reel_id}.mp4",
+            "size_mb": round(mb, 1),
+            "duration": round(total_vid, 1),
+            "captions": captions,
+            "voice": req.voice,
+            "bgm": req.bgm,
+            "tts_volume": req.tts_volume,
+            "bgm_volume": req.bgm_volume,
+            "tts_tempo": req.tts_tempo,
+        }
+
+        # Cache the result for this story
+        reel_cache[req.story_id] = result_data
+
         jobs[job_id] = {
             "status": "done",
             "progress": 100,
             "message": "Reel ready!",
-            "result": {
-                "url": f"/reels/{reel_id}.mp4",
-                "filename": f"{reel_id}.mp4",
-                "size_mb": round(mb, 1),
-                "duration": round(total_vid, 1),
-                "captions": captions,
-            },
+            "result": result_data,
         }
     else:
         raise Exception("Failed to generate reel")
@@ -465,9 +487,9 @@ def _generate_captions(story: dict) -> dict:
     characters = ", ".join(c["name"] for c in story.get("characters", []))
     scene_texts = " ".join(s["text"] for s in story.get("scenes", [])[:3])
 
-    prompt = f"""You are a social media expert for a children's bedtime story brand called TheStoryMama.
+    prompt = f"""You are the social media manager for TheStoryMama — a children's bedtime story brand.
 
-Generate captions for Instagram Reels and YouTube Shorts for this story:
+Generate captions for this story. Follow the EXACT format templates below.
 
 STORY: {title}
 CHARACTERS: {characters}
@@ -475,14 +497,18 @@ MORAL: {moral or 'None'}
 OPENING: {scene_texts}
 
 Return JSON with these fields:
+
 {{
-  "instagram_caption": "Instagram caption (2-3 engaging lines + call to action + 15-20 relevant hashtags). Make it warm, relatable to parents. Include 'Read the full story free — link in bio' as CTA. Use emojis sparingly (2-3 max).",
-  "youtube_title": "YouTube video title (under 60 chars, SEO-friendly, includes 'Bedtime Story' or 'Kids Story')",
-  "youtube_description": "YouTube description (3-4 lines: story hook, what kids will love about it, CTA to visit thestorymama.club, 5-8 relevant tags)",
-  "pinterest_description": "Pinterest pin description (2-3 SEO-rich sentences for the story, include keywords: bedtime story, toddler, free, illustrated)"
+  "instagram_caption": "Follow this EXACT format:\n\n[One warm, emotional opening line about the story — make parents feel something]\n\n[One line describing what happens in the story — create curiosity]\n\nRead the full story free — link in bio\n\nFollow @thestorymama for daily bedtime stories\n\n[15-20 hashtags on a new line, always include: #bedtimestories #toddlermom #kidsstories #storytime #thestorymama #readtogether #picturebooks #toddlerlife #momlife #freestories — add 5-10 more relevant ones]",
+
+  "youtube_title": "[Story Title] | Bedtime Story for Kids | TheStoryMama (under 60 chars total)",
+
+  "youtube_description": "Follow this EXACT format:\n\n[Story Title] — A beautiful illustrated bedtime story\n\n[2 sentences: what the story is about and what kids will love]\n\nRead this story and 150+ more free at www.thestorymama.club\n\nSubscribe to @thestorymamaofficial for new stories every week!\n\n#bedtimestories #kidsstories #storytime #toddler #readaloud #thestorymama",
+
+  "pinterest_description": "[Story Title] — A free illustrated bedtime story for toddlers aged 2-4. [One sentence about the plot]. Perfect for bedtime reading or quiet time. Read free at thestorymama.club. #bedtimestories #toddlerstories #freekidsbooks #illustratedstories #picturebooks"
 }}
 
-Make each caption unique and compelling. Parents should want to stop scrolling and watch."""
+IMPORTANT: Follow the templates exactly. Keep the consistent brand voice — warm, personal, parent-to-parent. Hashtags can vary per story but always include the core set."""
 
     try:
         response = client.chat.completions.create(
@@ -982,6 +1008,12 @@ function selectStory(id) {
   document.getElementById('selectedStory').textContent = selectedStory.title;
   document.getElementById('generateBtn').disabled = false;
 
+  // Hide previous results
+  document.getElementById('previewArea').style.display = 'none';
+  document.getElementById('downloadLink').style.display = 'none';
+  document.getElementById('captionsArea').style.display = 'none';
+  document.getElementById('status').innerHTML = '';
+
   // Show scene previews
   const preview = document.getElementById('scenePreview');
   let imgs = '';
@@ -992,6 +1024,28 @@ function selectStory(id) {
 
   // Check TTS status
   checkTTSStatus(id);
+
+  // Check for cached reel
+  fetch('/api/reel-cache/' + id).then(r => r.json()).then(data => {
+    if (data.cached && data.result) {
+      const r = data.result;
+      setStatus('Previous reel available (' + r.size_mb + ' MB, ' + r.duration + 's)', 'info');
+      const player = document.getElementById('videoPlayer');
+      player.src = r.url;
+      document.getElementById('previewArea').style.display = 'block';
+      const dl = document.getElementById('downloadLink');
+      dl.href = r.url;
+      dl.download = r.filename;
+      dl.style.display = 'inline';
+      if (r.captions) showCaptions(r.captions);
+      // Restore slider values from cached settings
+      if (r.voice) document.getElementById('voice').value = r.voice;
+      if (r.bgm) document.getElementById('bgm').value = r.bgm;
+      if (r.tts_volume) { document.getElementById('ttsVol').value = r.tts_volume; document.getElementById('ttsVolVal').textContent = r.tts_volume; }
+      if (r.bgm_volume) { document.getElementById('bgmVol').value = r.bgm_volume; document.getElementById('bgmVolVal').textContent = r.bgm_volume; }
+      if (r.tts_tempo) { document.getElementById('ttsTempo').value = r.tts_tempo; document.getElementById('ttsTempoVal').textContent = r.tts_tempo + 'x'; }
+    }
+  }).catch(() => {});
 }
 
 function checkTTSStatus(id) {
