@@ -954,9 +954,9 @@ h1 { color: #654321; margin-bottom: 8px; }
     <h2>Reel Settings</h2>
     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
       <div id="selectedStory" style="font-size:14px; color:#8B7D6B;">No story selected</div>
-      <div id="storyActions" style="display:none; flex-shrink:0;">
-        <button class="btn" id="btnToggleVisibility" onclick="toggleVisibility()" style="font-size:11px; padding:5px 12px; background:#FFE0E0; color:#C94B4B;">Hide from Website</button>
-        <button class="btn" id="btnToggleFeatured" onclick="toggleFeatured()" style="font-size:11px; padding:5px 12px; background:#FFF3E0; color:#8B6914;">Add to Featured</button>
+      <div id="storyActions" style="display:none; flex-shrink:0; gap:6px;">
+        <button id="btnToggleVisibility" style="font-size:11px; padding:6px 14px; border-radius:8px; border:none; cursor:pointer; font-weight:600; background:#FFE0E0; color:#C94B4B;">Hide from Website</button>
+        <button id="btnToggleFeatured" style="font-size:11px; padding:6px 14px; border-radius:8px; border:none; cursor:pointer; font-weight:600; background:#FFF3E0; color:#8B6914;">Add to Featured</button>
       </div>
     </div>
     <div class="scene-preview" id="scenePreview"></div>
@@ -1292,8 +1292,11 @@ function updateStoryActions(id) {
   }).catch(() => {});
 }
 
+document.getElementById('btnToggleVisibility').addEventListener('click', toggleVisibility);
+document.getElementById('btnToggleFeatured').addEventListener('click', toggleFeatured);
+
 function toggleVisibility() {
-  if (!selectedStory) return;
+  if (!selectedStory) { alert('No story selected'); return; }
   const isHidden = (storyConfig.hidden || []).includes(selectedStory.id);
   const endpoint = isHidden ? '/api/show-story' : '/api/hide-story';
 
