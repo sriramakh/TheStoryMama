@@ -997,10 +997,15 @@ h1 { color: #654321; margin-bottom: 8px; }
 let stories = [];
 let selectedStory = null;
 
-// Load stories
+// Load stories and restore last selected
 fetch('/api/stories').then(r => r.json()).then(data => {
   stories = data.stories;
   renderStories(stories);
+  // Auto-restore last selected story
+  const lastStory = localStorage.getItem('lastStoryId');
+  if (lastStory && stories.find(s => s.id === lastStory)) {
+    selectStory(lastStory);
+  }
 });
 
 function renderStories(list) {
@@ -1022,6 +1027,7 @@ document.getElementById('search').addEventListener('input', e => {
 
 function selectStory(id) {
   selectedStory = stories.find(s => s.id === id);
+  localStorage.setItem('lastStoryId', id);
   document.querySelectorAll('.story-item').forEach(el => el.classList.remove('selected'));
   const el = document.getElementById('story-' + id);
   if (el) el.classList.add('selected');
