@@ -255,9 +255,15 @@ class StoryService:
 
     def get_pdf_path(self, story_id: str) -> str | None:
         folder = os.path.join(self.stories_dir, story_id)
+        # Try story.pdf first
         pdf_path = os.path.join(folder, "story.pdf")
         if os.path.exists(pdf_path):
             return pdf_path
+        # Find any PDF in the folder
+        if os.path.exists(folder):
+            for f in os.listdir(folder):
+                if f.endswith(".pdf"):
+                    return os.path.join(folder, f)
         return None
 
     def _story_to_response(self, story: dict, base_url: str = "") -> dict:
