@@ -1960,6 +1960,7 @@ def _build_single(req: BuildSingleRequest, job_id: str):
     os.makedirs(staging_dir, exist_ok=True)
     folder_name = f"staging_{job_id}_{_sanitize(story['title'])}"
     folder = os.path.join(staging_dir, folder_name)
+    os.makedirs(folder, exist_ok=True)
     save_story_json(story, folder)
 
     # Override image size for this generation
