@@ -670,8 +670,9 @@ def get_story_details(story_id: str):
 @app.post("/api/correct-scene")
 def correct_scene(req: CorrectionRequest):
     """Regenerate a scene image based on QC feedback. Returns job_id for polling."""
-    story_path = os.path.join(STORIES_DIR, req.story_id, "story_data.json")
-    if not os.path.exists(story_path):
+    staging_path = os.path.join("reel_studio_cache", "staging", req.story_id, "story_data.json")
+    published_path = os.path.join(STORIES_DIR, req.story_id, "story_data.json")
+    if not os.path.exists(staging_path) and not os.path.exists(published_path):
         raise HTTPException(404, "Story not found")
 
     job_id = uuid.uuid4().hex[:10]
