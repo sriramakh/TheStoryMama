@@ -123,6 +123,22 @@ async def get_story_pdf(story_id: str):
     return FileResponse(path, media_type="application/pdf", filename=f"{story_id}.pdf")
 
 
+@router.get("/stories/{story_id}/video")
+async def get_story_video(story_id: str):
+    """Serve the demo reel video for a story."""
+    story_dir = os.path.join(Config.OUTPUT_DIR, story_id)
+    # Look for demo_reel.mp4 or any .mp4
+    for name in ["demo_reel.mp4", "story.mp4"]:
+        path = os.path.join(story_dir, name)
+        if os.path.exists(path):
+            return FileResponse(path, media_type="video/mp4", filename=f"{story_id}.mp4")
+    # Try any mp4
+    for f in os.listdir(story_dir) if os.path.exists(story_dir) else []:
+        if f.endswith(".mp4"):
+            return FileResponse(os.path.join(story_dir, f), media_type="video/mp4")
+    raise HTTPException(status_code=404, detail="Video not found")
+
+
 @router.get("/styles", response_model=StyleListResponse)
 async def list_styles():
     styles = [
