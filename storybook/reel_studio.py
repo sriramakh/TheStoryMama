@@ -226,11 +226,14 @@ def list_stories():
 
 @app.get("/api/stories/{story_id}/image/{scene_num}")
 def get_scene_image(story_id: str, scene_num: int):
-    """Serve a scene image."""
-    for ext in [".jpg", "_web.jpg", "_raw.png"]:
-        path = os.path.join(STORIES_DIR, story_id, f"scene_{scene_num:02d}{ext}")
-        if os.path.exists(path):
-            return FileResponse(path)
+    """Serve a scene image — checks staging first, then published stories."""
+    # Check staging directory first
+    staging_dir = os.path.join("reel_studio_cache", "staging")
+    for base_dir in [staging_dir, STORIES_DIR]:
+        for ext in ["_web.jpg", "_raw.png", ".jpg"]:
+            path = os.path.join(base_dir, story_id, f"scene_{scene_num:02d}{ext}")
+            if os.path.exists(path):
+                return FileResponse(path)
     raise HTTPException(404, "Image not found")
 
 
@@ -691,7 +694,11 @@ def _correct_scene_impl(req: CorrectionRequest, job_id: str):
     """Regenerate a scene image with correction feedback."""
     import base64
 
-    story_path = os.path.join(STORIES_DIR, req.story_id, "story_data.json")
+    # Check staging first, then published
+    staging_dir = os.path.join("reel_studio_cache", "staging")
+    story_path = os.path.join(staging_dir, req.story_id, "story_data.json")
+    if not os.path.exists(story_path):
+        story_path = os.path.join(STORIES_DIR, req.story_id, "story_data.json")
     with open(story_path) as f:
         story = json.load(f)
 
@@ -742,7 +749,9 @@ def _correct_scene_impl(req: CorrectionRequest, job_id: str):
     jobs[job_id] = {"status": "running", "progress": 30, "message": "Generating corrected image...", "result": None}
 
     sn = req.scene_number
-    story_dir = os.path.join(STORIES_DIR, req.story_id)
+    # Check staging first, then published
+    staging_path = os.path.join("reel_studio_cache", "staging", req.story_id)
+    story_dir = staging_path if os.path.exists(staging_path) else os.path.join(STORIES_DIR, req.story_id)
     existing_img = None
     for ext in ["_raw.png", "_web.jpg", ".jpg"]:
         p = os.path.join(story_dir, f"scene_{sn:02d}{ext}")
@@ -863,7 +872,8 @@ RULES:
 @app.post("/api/approve-correction/{story_id}/{scene_num}")
 def approve_correction(story_id: str, scene_num: int):
     """Approve a correction — delete backups."""
-    story_dir = os.path.join(STORIES_DIR, story_id)
+    staging_path = os.path.join("reel_studio_cache", "staging", story_id)
+    story_dir = staging_path if os.path.exists(staging_path) else os.path.join(STORIES_DIR, story_id)
     removed = 0
     for ext in ["_raw.png.bak", "_web.jpg.bak", ".jpg.bak"]:
         bak = os.path.join(story_dir, f"scene_{scene_num:02d}{ext}")
@@ -876,7 +886,8 @@ def approve_correction(story_id: str, scene_num: int):
 @app.post("/api/reject-correction/{story_id}/{scene_num}")
 def reject_correction(story_id: str, scene_num: int):
     """Reject a correction — restore from backups."""
-    story_dir = os.path.join(STORIES_DIR, story_id)
+    staging_path = os.path.join("reel_studio_cache", "staging", story_id)
+    story_dir = staging_path if os.path.exists(staging_path) else os.path.join(STORIES_DIR, story_id)
     restored = 0
     for ext in ["_raw.png", "_web.jpg", ".jpg"]:
         bak = os.path.join(story_dir, f"scene_{scene_num:02d}{ext}.bak")
@@ -1849,15 +1860,46 @@ Write a single paragraph describing what should be shown in the illustration. In
 
 @app.post("/api/build/approve")
 def approve_build(req: BuildApproveRequest):
-    """Approve a build and publish to the website."""
+    """Approve a build — move from staging to published stories directory."""
+    from utils import get_next_story_number, sanitize_folder_name
+
     job = build_jobs.get(req.job_id)
     if not job:
         raise HTTPException(404, "Job not found")
 
-    if job.get("result") and job["result"].get("story_id"):
-        return {"published": True, "story_id": job["result"]["story_id"]}
+    result = job.get("result")
+    if not result or not result.get("staging_folder"):
+        raise HTTPException(400, "Build not ready for approval")
 
-    raise HTTPException(400, "Build not ready for approval")
+    if result.get("published"):
+        return {"published": True, "story_id": result.get("story_id")}
+
+    staging_folder = result["staging_folder"]
+    if not os.path.exists(staging_folder):
+        raise HTTPException(400, "Staging folder not found")
+
+    # Move from staging to published stories directory
+    story = job.get("story", {})
+    serial = get_next_story_number(STORIES_DIR)
+    title_safe = sanitize_folder_name(story.get("title", "Untitled"))
+    published_name = f"{serial:03d}_{title_safe}"
+    published_folder = os.path.join(STORIES_DIR, published_name)
+
+    shutil.move(staging_folder, published_folder)
+
+    # Update story_data.json path reference
+    story_json = os.path.join(published_folder, "story_data.json")
+    if os.path.exists(story_json):
+        with open(story_json) as f:
+            data = json.load(f)
+        data["_published"] = True
+        with open(story_json, "w") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+
+    result["published"] = True
+    result["story_id"] = published_name
+
+    return {"published": True, "story_id": published_name}
 
 
 @app.post("/api/build/regenerate-image")
@@ -1910,11 +1952,14 @@ def _build_single(req: BuildSingleRequest, job_id: str):
     build_jobs[job_id]["story"] = story
     build_jobs[job_id].update({"progress": 15, "message": f"Story: {story['title']}"})
 
-    # Phase 2: Generate images
+    # Phase 2: Generate images in STAGING directory (not published yet)
     build_jobs[job_id].update({"phase": "images", "progress": 20, "message": "Generating images..."})
 
-    serial = get_next_story_number(Config.OUTPUT_DIR)
-    folder = create_story_folder(Config.OUTPUT_DIR, serial, story["title"])
+    from utils import sanitize_folder_name as _sanitize
+    staging_dir = os.path.join("reel_studio_cache", "staging")
+    os.makedirs(staging_dir, exist_ok=True)
+    folder_name = f"staging_{job_id}_{_sanitize(story['title'])}"
+    folder = os.path.join(staging_dir, folder_name)
     save_story_json(story, folder)
 
     # Override image size for this generation
@@ -1971,19 +2016,20 @@ def _build_single(req: BuildSingleRequest, job_id: str):
     pdf_path = os.path.join(folder, pdf_name)
     StoryBookPDF().compile_pdf(story=story, image_paths=final_paths, output_path=pdf_path)
 
-    # Get story ID (folder name)
-    story_id = os.path.basename(folder)
+    # Story stays in staging — not published until approved
+    staging_id = os.path.basename(folder)
 
     build_jobs[job_id].update({
         "status": "review",
         "phase": "review",
         "progress": 95,
-        "message": "Ready for review",
+        "message": "Ready for review (not published yet)",
         "result": {
-            "story_id": story_id,
+            "staging_id": staging_id,
+            "staging_folder": folder,
             "title": story["title"],
-            "folder": folder,
             "scenes": total_scenes,
+            "published": False,
         },
     })
 
@@ -2234,10 +2280,32 @@ textarea { min-height: 120px; resize: vertical; }
       <div id="fixContextArea"></div>
       <label style="margin-top:12px;">What needs to be fixed?</label>
       <textarea id="fixFeedback" placeholder="e.g. Mia should have brown curly hair, the bird should be smaller, change background to a sunny garden..." style="min-height:80px;"></textarea>
-      <button class="btn btn-primary" onclick="submitInlineFix()" style="margin-top:10px; font-size:13px; padding:10px 20px;">Regenerate Scene</button>
+      <button class="btn btn-primary" id="fixSubmitBtn" onclick="submitInlineFix()" style="margin-top:10px; font-size:13px; padding:10px 20px;">Regenerate Scene</button>
       <div id="fixProgress" class="hidden" style="margin-top:10px;">
         <div class="progress-bar"><div class="progress-fill" id="fixProgressFill"></div></div>
         <div class="progress-msg" id="fixProgressMsg">Fixing...</div>
+      </div>
+
+      <!-- Before/After comparison -->
+      <div id="fixCompare" class="hidden" style="margin-top:16px;">
+        <h4 style="font-size:13px; color:#654321; margin-bottom:8px;">Compare: Before vs After</h4>
+        <div style="display:flex; gap:12px;">
+          <div style="flex:1; text-align:center;">
+            <img id="fixCompBefore" style="width:100%; border-radius:8px; border:2px solid #EDE5D8;">
+            <div style="font-size:11px; color:#8B7D6B; margin-top:4px;">Before</div>
+          </div>
+          <div style="flex:1; text-align:center;">
+            <img id="fixCompAfter" style="width:100%; border-radius:8px; border:2px solid #D4F5E9;">
+            <div style="font-size:11px; color:#2D5F4A; margin-top:4px;">After</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Approve/Reject buttons -->
+      <div id="fixApprovalBtns" class="hidden" style="margin-top:12px; display:flex; gap:8px;">
+        <button class="btn" style="background:#D4F5E9; color:#2D5F4A; font-size:13px; padding:8px 16px;" onclick="approveFixInline()">Accept Change</button>
+        <button class="btn" style="background:#FFE0E0; color:#C94B4B; font-size:13px; padding:8px 16px;" onclick="rejectFixInline()">Reject & Revert</button>
+        <button class="btn" style="background:#E8D5F5; color:#5B4370; font-size:13px; padding:8px 16px;" onclick="retryFixInline()">Try Again</button>
       </div>
     </div>
 
@@ -2541,6 +2609,7 @@ function pollBuildJob(jobId, type) {
 
       if (data.status === 'review' && data.result) {
         document.getElementById('singleProgress').classList.add('hidden');
+        currentBuildJobId = jobId;
         showQCReview(data);
         document.getElementById('btnBuildSingle').disabled = false;
       } else if (data.status === 'failed') {
@@ -2583,9 +2652,12 @@ let fixingSceneNum = null;
 
 let qcStoryScenes = [];
 
+let currentBuildJobId = null;
+let build_jobs_local = {};
+
 function showQCReview(jobData) {
   document.getElementById('qcReview').classList.remove('hidden');
-  currentStoryId = jobData.result.story_id;
+  currentStoryId = jobData.result.staging_id || jobData.result.story_id;
   const scores = jobData.qc_scores || [];
   qcStoryScenes = jobData.story?.scenes || [];
 
@@ -2617,6 +2689,8 @@ function openInlineFix(sceneNum, storyId) {
   document.getElementById('fixSceneNum').textContent = '#' + sceneNum;
   document.getElementById('fixFeedback').value = '';
   document.getElementById('fixProgress').classList.add('hidden');
+  document.getElementById('fixCompare').classList.add('hidden');
+  document.getElementById('fixApprovalBtns').classList.add('hidden');
 
   // Build context strip: previous, current, next
   const totalScenes = qcStoryScenes.length;
@@ -2624,7 +2698,7 @@ function openInlineFix(sceneNum, storyId) {
   if (sceneNum > 1) {
     contextHtml += '<div><img src="/api/stories/' + storyId + '/image/' + (sceneNum - 1) + '?t=' + Date.now() + '"><div class="ctx-label">Scene ' + (sceneNum - 1) + '</div></div>';
   }
-  contextHtml += '<div><img src="/api/stories/' + storyId + '/image/' + sceneNum + '?t=' + Date.now() + '" class="current"><div class="ctx-label">Scene ' + sceneNum + ' (fixing)</div></div>';
+  contextHtml += '<div><img src="/api/stories/' + storyId + '/image/' + sceneNum + '?t=' + Date.now() + '" class="current" id="fixBeforeImg"><div class="ctx-label">Scene ' + sceneNum + ' (current)</div></div>';
   if (sceneNum < totalScenes) {
     contextHtml += '<div><img src="/api/stories/' + storyId + '/image/' + (sceneNum + 1) + '?t=' + Date.now() + '"><div class="ctx-label">Scene ' + (sceneNum + 1) + '</div></div>';
   }
@@ -2642,23 +2716,35 @@ function closeInlineCorrection() {
   document.getElementById('inlineCorrection').classList.add('hidden');
 }
 
+let fixBeforeUrl = null;
+
 function submitInlineFix() {
   if (!currentStoryId || !fixingSceneNum) return;
   const feedback = document.getElementById('fixFeedback').value.trim();
   if (!feedback) { alert('Describe what needs fixing'); return; }
 
+  // Save the before image URL
+  fixBeforeUrl = '/api/stories/' + currentStoryId + '/image/' + fixingSceneNum + '?t=' + Date.now();
+
   document.getElementById('fixProgress').classList.remove('hidden');
+  document.getElementById('fixCompare').classList.add('hidden');
+  document.getElementById('fixApprovalBtns').classList.add('hidden');
+  document.getElementById('fixSubmitBtn').disabled = true;
   document.getElementById('fixProgressFill').style.width = '10%';
   document.getElementById('fixProgressMsg').textContent = 'Regenerating...';
+
+  // Determine which story folder to use (staging or published)
+  const storyIdForFix = currentStoryId;
 
   fetch('/api/correct-scene', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ story_id: currentStoryId, scene_number: fixingSceneNum, feedback: feedback }),
+    body: JSON.stringify({ story_id: storyIdForFix, scene_number: fixingSceneNum, feedback: feedback }),
   }).then(r => r.json()).then(data => {
     if (data.job_id) pollFixJob(data.job_id);
   }).catch(e => {
     document.getElementById('fixProgressMsg').textContent = 'Error: ' + e.message;
+    document.getElementById('fixSubmitBtn').disabled = false;
   });
 }
 
@@ -2669,28 +2755,85 @@ function pollFixJob(jobId) {
 
     if (data.status === 'done') {
       document.getElementById('fixProgress').classList.add('hidden');
-      closeInlineCorrection();
-      // Refresh QC grid images
-      document.querySelectorAll('.qc-item img').forEach(img => {
-        img.src = img.src.split('?')[0] + '?t=' + Date.now();
-      });
-      document.getElementById('singleStatus').innerHTML = '<div class="status success">Scene fixed!</div>';
+      document.getElementById('fixSubmitBtn').disabled = false;
+
+      // Show before/after comparison
+      document.getElementById('fixCompBefore').src = fixBeforeUrl;
+      document.getElementById('fixCompAfter').src = '/api/stories/' + currentStoryId + '/image/' + fixingSceneNum + '?t=' + Date.now();
+      document.getElementById('fixCompare').classList.remove('hidden');
+      document.getElementById('fixApprovalBtns').classList.remove('hidden');
+      document.getElementById('fixApprovalBtns').style.display = 'flex';
     } else if (data.status === 'failed') {
       document.getElementById('fixProgressMsg').textContent = 'Failed: ' + data.message;
+      document.getElementById('fixSubmitBtn').disabled = false;
     } else {
       setTimeout(() => pollFixJob(jobId), 1500);
     }
   }).catch(() => setTimeout(() => pollFixJob(jobId), 2000));
 }
 
+function approveFixInline() {
+  // Accept the change — approve the correction (delete backup)
+  fetch('/api/approve-correction/' + currentStoryId + '/' + fixingSceneNum, { method: 'POST' })
+    .then(r => r.json())
+    .then(() => {
+      closeInlineCorrection();
+      refreshQCGrid();
+      document.getElementById('singleStatus').innerHTML = '<div class="status success">Scene ' + fixingSceneNum + ' updated!</div>';
+    });
+}
+
+function rejectFixInline() {
+  // Reject — restore original from backup
+  fetch('/api/reject-correction/' + currentStoryId + '/' + fixingSceneNum, { method: 'POST' })
+    .then(r => r.json())
+    .then(() => {
+      closeInlineCorrection();
+      refreshQCGrid();
+      document.getElementById('singleStatus').innerHTML = '<div class="status info">Scene ' + fixingSceneNum + ' reverted to original.</div>';
+    });
+}
+
+function retryFixInline() {
+  // Reject current and allow new feedback
+  fetch('/api/reject-correction/' + currentStoryId + '/' + fixingSceneNum, { method: 'POST' })
+    .then(() => {
+      document.getElementById('fixCompare').classList.add('hidden');
+      document.getElementById('fixApprovalBtns').classList.add('hidden');
+      document.getElementById('fixFeedback').focus();
+    });
+}
+
+function refreshQCGrid() {
+  document.querySelectorAll('.qc-item img').forEach(img => {
+    img.src = img.src.split('?')[0] + '?t=' + Date.now();
+  });
+}
+
 function publishStory() {
-  if (!currentStoryId) return;
-  document.getElementById('singleStatus').innerHTML = '<div class="status success">Story published! <a href="https://www.thestorymama.club/stories/' + currentStoryId + '" target="_blank" style="color:#2D5F4A; font-weight:600;">View on website &rarr;</a></div>';
-  // Show video section
-  document.getElementById('videoSection').classList.remove('hidden');
-  setTimeout(() => {
-    document.getElementById('videoSection').scrollIntoView({ behavior: 'smooth' });
-  }, 300);
+  if (!currentBuildJobId) { alert('No build job found'); return; }
+
+  document.getElementById('singleStatus').innerHTML = '<div class="status info">Publishing...</div>';
+
+  fetch('/api/build/approve', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ job_id: currentBuildJobId }),
+  }).then(r => r.json()).then(data => {
+    if (data.published) {
+      currentStoryId = data.story_id;
+      document.getElementById('singleStatus').innerHTML = '<div class="status success">Story published! <a href="https://www.thestorymama.club/stories/' + data.story_id + '" target="_blank" style="color:#2D5F4A; font-weight:600;">View on website &rarr;</a></div>';
+      // Show video section
+      document.getElementById('videoSection').classList.remove('hidden');
+      setTimeout(() => {
+        document.getElementById('videoSection').scrollIntoView({ behavior: 'smooth' });
+      }, 300);
+    } else {
+      document.getElementById('singleStatus').innerHTML = '<div class="status error">Failed to publish</div>';
+    }
+  }).catch(e => {
+    document.getElementById('singleStatus').innerHTML = '<div class="status error">Error: ' + e.message + '</div>';
+  });
 }
 
 // Inline video generation
