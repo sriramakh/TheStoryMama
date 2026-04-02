@@ -54,11 +54,26 @@ interface StoryData {
 export default function DemoPage() {
   const [phase, setPhase] = useState<"input" | "generating" | "result">("input");
   const [description, setDescription] = useState("");
+  const [selectedStyle, setSelectedStyle] = useState("animation_movie");
+  const [sceneCount, setSceneCount] = useState("auto");
   const [progressStep, setProgressStep] = useState(0);
   const [progressPct, setProgressPct] = useState(0);
   const [story, setStory] = useState<StoryData | null>(null);
   const [currentScene, setCurrentScene] = useState(0);
   const [showVideo, setShowVideo] = useState(false);
+
+  const STYLES = [
+    { id: "animation_movie", name: "Animation Movie", emoji: "🎬", desc: "Modern 3D animated style with expressive characters" },
+    { id: "claymation", name: "Claymation", emoji: "🧸", desc: "Clay textures with handmade miniature sets" },
+    { id: "paper_cutout", name: "Paper Cutout", emoji: "✂️", desc: "Layered paper textures with bold flat colors" },
+    { id: "glowlight_fantasy", name: "Glowlight Fantasy", emoji: "🌟", desc: "Bioluminescent glow with twilight hues" },
+    { id: "felt_plushie", name: "Felt & Plushie", emoji: "🧵", desc: "Soft fabric textures with button eyes" },
+    { id: "stained_glass", name: "Stained Glass", emoji: "🪟", desc: "Jewel tones with bold black outlines" },
+    { id: "toy_diorama", name: "Toy Diorama", emoji: "🏠", desc: "Miniature figurines with tilt-shift feel" },
+    { id: "crochet_amigurumi", name: "Crochet Amigurumi", emoji: "🧶", desc: "Yarn-textured handmade toy style" },
+    { id: "candy_clay", name: "Candy Clay", emoji: "🍬", desc: "Smooth polymer clay in vivid candy colors" },
+    { id: "picture_book_collage", name: "Picture Book Collage", emoji: "🎨", desc: "Mixed-media torn paper and painted textures" },
+  ];
 
   // Run fake progress animation
   useEffect(() => {
@@ -135,29 +150,63 @@ export default function DemoPage() {
                 </p>
               </div>
 
-              <div className="mt-6 bg-[var(--color-pastel-cream)] rounded-xl p-4">
-                <p className="text-sm font-medium text-[var(--color-warm-brown)] mb-2">
-                  Art Style
+              {/* Art Style Selection */}
+              <div className="mt-6">
+                <p className="text-sm font-medium text-[var(--color-warm-brown)] mb-3">
+                  Choose Art Style
                 </p>
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-lg bg-[var(--color-pastel-pink)] flex items-center justify-center">
-                    <span className="text-lg">🎬</span>
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-[var(--color-warm-brown)]">
-                      Animation Movie
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Modern 3D animated style with expressive characters
-                    </p>
-                  </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+                  {STYLES.map((style) => (
+                    <button
+                      key={style.id}
+                      onClick={() => setSelectedStyle(style.id)}
+                      className={`rounded-xl p-3 text-center transition-all ${
+                        selectedStyle === style.id
+                          ? "bg-[var(--color-pastel-pink)] ring-2 ring-[var(--color-pastel-rose)] shadow-sm"
+                          : "bg-[var(--color-pastel-cream)] hover:bg-[var(--color-pastel-cream)]/80"
+                      }`}
+                    >
+                      <span className="text-xl">{style.emoji}</span>
+                      <p className="text-[10px] font-semibold text-[var(--color-warm-brown)] mt-1 leading-tight">
+                        {style.name}
+                      </p>
+                    </button>
+                  ))}
                 </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  {STYLES.find((s) => s.id === selectedStyle)?.desc}
+                </p>
               </div>
 
-              <div className="mt-6 bg-[var(--color-pastel-cream)] rounded-xl p-4">
-                <div className="flex justify-between text-sm">
-                  <span className="text-[var(--color-warm-brown)] font-medium">Scenes</span>
-                  <span className="text-[var(--color-warm-brown)] font-semibold">12 illustrated scenes</span>
+              {/* Scene Count */}
+              <div className="mt-6">
+                <p className="text-sm font-medium text-[var(--color-warm-brown)] mb-3">
+                  Number of Scenes
+                </p>
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    onClick={() => setSceneCount("auto")}
+                    className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
+                      sceneCount === "auto"
+                        ? "bg-[var(--color-pastel-pink)] text-[var(--color-warm-brown)] shadow-sm"
+                        : "bg-[var(--color-pastel-cream)] text-muted-foreground hover:bg-[var(--color-pastel-cream)]/80"
+                    }`}
+                  >
+                    Auto (recommended)
+                  </button>
+                  {[10, 11, 12, 13, 14, 15].map((n) => (
+                    <button
+                      key={n}
+                      onClick={() => setSceneCount(String(n))}
+                      className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
+                        sceneCount === String(n)
+                          ? "bg-[var(--color-pastel-pink)] text-[var(--color-warm-brown)] shadow-sm"
+                          : "bg-[var(--color-pastel-cream)] text-muted-foreground hover:bg-[var(--color-pastel-cream)]/80"
+                      }`}
+                    >
+                      {n}
+                    </button>
+                  ))}
                 </div>
               </div>
 
