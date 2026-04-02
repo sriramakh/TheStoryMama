@@ -270,9 +270,15 @@ def _categorize_story(story_data: dict) -> list[str]:
     return categories[:4]
 
 
-def _detect_orientation(folder_name: str) -> str:
-    """Detect portrait or landscape from scene 1 image."""
+def _detect_orientation(folder_name: str, story_data: dict) -> str:
+    """Detect portrait or landscape. Caches result in story_data.json."""
+    # Return cached value if present
+    if story_data.get("orientation"):
+        return story_data["orientation"]
+
+    # Detect from image
     story_dir = os.path.join(Config.OUTPUT_DIR, folder_name)
+    orientation = "portrait"
     for ext in ["_web.jpg", "_raw.png", ".jpg"]:
         img_path = os.path.join(story_dir, f"scene_01{ext}")
         if os.path.exists(img_path):
@@ -280,16 +286,28 @@ def _detect_orientation(folder_name: str) -> str:
                 from PIL import Image as PILImage
                 with PILImage.open(img_path) as img:
                     w, h = img.size
-                    return "landscape" if w > h else "portrait"
+                    orientation = "landscape" if w > h else "portrait"
             except:
                 pass
-    return "portrait"  # default
+            break
+
+    # Cache it in story_data.json so we don't re-detect
+    try:
+        json_path = os.path.join(story_dir, "story_data.json")
+        if os.path.exists(json_path):
+            story_data["orientation"] = orientation
+            with open(json_path, "w") as f:
+                json.dump(story_data, f, indent=2, ensure_ascii=False)
+    except:
+        pass
+
+    return orientation
 
 
 def _story_to_dict(folder_name: str, story_data: dict) -> dict:
     """Convert a story JSON + folder name to API response dict."""
     categories = _categorize_story(story_data)
-    orientation = _detect_orientation(folder_name)
+    orientation = _detect_orientation(folder_name, story_data)
 
     return {
         "id": folder_name,
@@ -318,8 +336,21 @@ def _story_to_dict(folder_name: str, story_data: dict) -> dict:
     }
 
 
+# In-memory cache with TTL
+_stories_cache: list[dict] = []
+_stories_cache_time: float = 0
+_CACHE_TTL = 30  # seconds
+
+
 def _load_all_stories() -> list[dict]:
-    """Scan the stories directory and load all story_data.json files."""
+    """Scan the stories directory and load all story_data.json files. Cached for 30s."""
+    global _stories_cache, _stories_cache_time
+    import time as _time
+
+    now = _time.time()
+    if _stories_cache and (now - _stories_cache_time) < _CACHE_TTL:
+        return _stories_cache
+
     stories_dir = Config.OUTPUT_DIR
     if not os.path.exists(stories_dir):
         return []
@@ -347,6 +378,8 @@ def _load_all_stories() -> list[dict]:
         except (json.JSONDecodeError, IOError):
             continue
 
+    _stories_cache = results
+    _stories_cache_time = now
     return results
 
 
