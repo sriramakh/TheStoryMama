@@ -2100,11 +2100,17 @@ textarea { min-height: 120px; resize: vertical; }
 .scene-card textarea { margin-top: 8px; min-height: 60px; }
 .scene-card .score { font-size: 11px; padding: 2px 8px; border-radius: 6px; font-weight: 600; }
 
-.qc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-top: 16px; }
-.qc-item { background: #FFF9EB; border-radius: 10px; overflow: hidden; cursor: pointer; transition: all 0.15s; }
-.qc-item:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+.qc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; margin-top: 16px; }
+.qc-item { background: #FFF9EB; border-radius: 12px; overflow: hidden; cursor: pointer; transition: all 0.15s; border: 2px solid transparent; }
+.qc-item:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.12); transform: translateY(-2px); }
+.qc-item.needs-fix { border-color: #C94B4B; }
 .qc-item img { width: 100%; display: block; }
-.qc-item .info { padding: 8px; font-size: 12px; display: flex; justify-content: space-between; }
+.qc-item .info { padding: 10px 12px; font-size: 13px; display: flex; justify-content: space-between; align-items: center; }
+.qc-item .scene-text-preview { font-size: 11px; color: #8B7D6B; padding: 0 12px 10px; line-height: 1.4; }
+.context-strip { display: flex; gap: 8px; margin: 10px 0; overflow-x: auto; }
+.context-strip img { height: 120px; border-radius: 8px; border: 2px solid transparent; flex-shrink: 0; }
+.context-strip img.current { border-color: #E8829A; }
+.context-strip .ctx-label { font-size: 10px; color: #8B7D6B; text-align: center; margin-top: 2px; }
 
 .batch-story { background: #FFF9EB; border-radius: 10px; padding: 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
 .batch-story .title { font-size: 14px; font-weight: 600; color: #654321; }
@@ -2189,17 +2195,16 @@ textarea { min-height: 120px; resize: vertical; }
     <div class="qc-grid" id="qcGrid"></div>
 
     <!-- Inline correction panel -->
-    <div id="inlineCorrection" class="hidden" style="margin-top:16px; background:#FFF9EB; border-radius:12px; padding:16px;">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-        <h4 style="font-size:14px; color:#654321;">Fix Scene <span id="fixSceneNum"></span></h4>
-        <button style="font-size:11px; padding:4px 10px; background:#EDE5D8; border:none; border-radius:6px; cursor:pointer;" onclick="closeInlineCorrection()">Cancel</button>
+    <div id="inlineCorrection" class="hidden" style="margin-top:16px; background:white; border-radius:14px; padding:20px; box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h4 style="font-size:15px; color:#654321; font-weight:700;">Fix Scene <span id="fixSceneNum"></span></h4>
+        <button style="font-size:12px; padding:6px 14px; background:#EDE5D8; border:none; border-radius:8px; cursor:pointer; font-weight:600;" onclick="closeInlineCorrection()">Cancel</button>
       </div>
-      <div style="display:flex; gap:12px; margin-bottom:10px;">
-        <img id="fixSceneImg" style="height:150px; border-radius:8px;">
-      </div>
-      <textarea id="fixFeedback" placeholder="Describe what needs to be fixed..." style="min-height:60px;"></textarea>
-      <button class="btn btn-primary" onclick="submitInlineFix()" style="margin-top:8px; font-size:13px; padding:8px 16px;">Regenerate Scene</button>
-      <div id="fixProgress" class="hidden" style="margin-top:8px;">
+      <div id="fixContextArea"></div>
+      <label style="margin-top:12px;">What needs to be fixed?</label>
+      <textarea id="fixFeedback" placeholder="e.g. Mia should have brown curly hair, the bird should be smaller, change background to a sunny garden..." style="min-height:80px;"></textarea>
+      <button class="btn btn-primary" onclick="submitInlineFix()" style="margin-top:10px; font-size:13px; padding:10px 20px;">Regenerate Scene</button>
+      <div id="fixProgress" class="hidden" style="margin-top:10px;">
         <div class="progress-bar"><div class="progress-fill" id="fixProgressFill"></div></div>
         <div class="progress-msg" id="fixProgressMsg">Fixing...</div>
       </div>
@@ -2545,37 +2550,60 @@ function updateBatchProgress(pct, msg) {
 let currentStoryId = null;
 let fixingSceneNum = null;
 
+let qcStoryScenes = [];
+
 function showQCReview(jobData) {
   document.getElementById('qcReview').classList.remove('hidden');
   currentStoryId = jobData.result.story_id;
   const scores = jobData.qc_scores || [];
+  qcStoryScenes = jobData.story?.scenes || [];
 
   const grid = document.getElementById('qcGrid');
-  grid.innerHTML = (jobData.story?.scenes || []).map((s, i) => {
+  grid.innerHTML = qcStoryScenes.map((s, i) => {
     const qc = scores[i] || {};
     const score = qc.score;
     const color = score >= 0.75 ? '#2D5F4A' : '#C94B4B';
     const bg = score >= 0.75 ? '#D4F5E9' : '#FFE0E0';
+    const needsFix = score && score < 0.75;
     return `
-    <div class="qc-item" onclick="openInlineFix(${s.scene_number}, '${currentStoryId}')">
+    <div class="qc-item ${needsFix ? 'needs-fix' : ''}" onclick="openInlineFix(${s.scene_number}, '${currentStoryId}')">
       <img src="/api/stories/${currentStoryId}/image/${s.scene_number}?t=${Date.now()}" loading="lazy">
       <div class="info">
         <span>Scene ${s.scene_number}</span>
         <span class="score" style="background:${bg}; color:${color};">${score ? score.toFixed(2) : 'N/A'}</span>
       </div>
+      <div class="scene-text-preview">${s.text.substring(0, 80)}${s.text.length > 80 ? '...' : ''}</div>
     </div>`;
   }).join('');
 
   document.getElementById('singleStatus').innerHTML = '<div class="status info">Click any image to fix it. When satisfied, click Approve & Publish.</div>';
+  document.getElementById('qcReview').scrollIntoView({ behavior: 'smooth' });
 }
 
 function openInlineFix(sceneNum, storyId) {
   fixingSceneNum = sceneNum;
   document.getElementById('inlineCorrection').classList.remove('hidden');
   document.getElementById('fixSceneNum').textContent = '#' + sceneNum;
-  document.getElementById('fixSceneImg').src = '/api/stories/' + storyId + '/image/' + sceneNum + '?t=' + Date.now();
   document.getElementById('fixFeedback').value = '';
   document.getElementById('fixProgress').classList.add('hidden');
+
+  // Build context strip: previous, current, next
+  const totalScenes = qcStoryScenes.length;
+  let contextHtml = '<div class="context-strip">';
+  if (sceneNum > 1) {
+    contextHtml += '<div><img src="/api/stories/' + storyId + '/image/' + (sceneNum - 1) + '?t=' + Date.now() + '"><div class="ctx-label">Scene ' + (sceneNum - 1) + '</div></div>';
+  }
+  contextHtml += '<div><img src="/api/stories/' + storyId + '/image/' + sceneNum + '?t=' + Date.now() + '" class="current"><div class="ctx-label">Scene ' + sceneNum + ' (fixing)</div></div>';
+  if (sceneNum < totalScenes) {
+    contextHtml += '<div><img src="/api/stories/' + storyId + '/image/' + (sceneNum + 1) + '?t=' + Date.now() + '"><div class="ctx-label">Scene ' + (sceneNum + 1) + '</div></div>';
+  }
+  contextHtml += '</div>';
+
+  // Show scene text
+  const scene = qcStoryScenes.find(s => s.scene_number === sceneNum);
+  const sceneText = scene ? '<p style="font-size:13px; color:#4A3728; margin:8px 0; background:#FFF9EB; padding:8px; border-radius:8px;">"' + scene.text + '"</p>' : '';
+
+  document.getElementById('fixContextArea').innerHTML = contextHtml + sceneText;
   document.getElementById('inlineCorrection').scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
@@ -2626,10 +2654,12 @@ function pollFixJob(jobId) {
 
 function publishStory() {
   if (!currentStoryId) return;
-  document.getElementById('singleStatus').innerHTML = '<div class="status success">Story published to thestorymama.club! <a href="https://www.thestorymama.club/stories/' + currentStoryId + '" target="_blank">View story</a></div>';
+  document.getElementById('singleStatus').innerHTML = '<div class="status success">Story published! <a href="https://www.thestorymama.club/stories/' + currentStoryId + '" target="_blank" style="color:#2D5F4A; font-weight:600;">View on website &rarr;</a></div>';
   // Show video section
   document.getElementById('videoSection').classList.remove('hidden');
-  document.getElementById('videoSection').scrollIntoView({ behavior: 'smooth' });
+  setTimeout(() => {
+    document.getElementById('videoSection').scrollIntoView({ behavior: 'smooth' });
+  }, 300);
 }
 
 // Inline video generation
