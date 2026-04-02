@@ -738,8 +738,30 @@ def _correct_scene_impl(req: CorrectionRequest, job_id: str):
         )
         visual_ref = resp.choices[0].message.content.strip()
 
-    # Step 2: Generate corrected image
+    # Step 2: Detect image orientation from existing scene
     jobs[job_id] = {"status": "running", "progress": 30, "message": "Generating corrected image...", "result": None}
+
+    sn = req.scene_number
+    story_dir = os.path.join(STORIES_DIR, req.story_id)
+    existing_img = None
+    for ext in ["_raw.png", "_web.jpg", ".jpg"]:
+        p = os.path.join(story_dir, f"scene_{sn:02d}{ext}")
+        if os.path.exists(p):
+            existing_img = p
+            break
+
+    # Detect orientation from existing image dimensions
+    image_size = Config.IMAGE_SIZE  # default fallback
+    if existing_img:
+        try:
+            with Image.open(existing_img) as img:
+                w, h = img.size
+                if w > h:
+                    image_size = "1536x1024"  # landscape
+                else:
+                    image_size = "1024x1536"  # portrait
+        except:
+            pass
 
     prompt = f"""{style['description']}
 
@@ -765,16 +787,25 @@ RULES:
 - Warm, friendly expressions appropriate for a children's book
 - DO NOT include any text, words, letters, or numbers in the image"""
 
-    result = client.images.generate(
-        model="gpt-image-1-mini",
-        prompt=prompt,
-        size=Config.IMAGE_SIZE,
-        quality="medium",
-    )
+    # Use reference image if available
+    if ref_img_path:
+        with open(ref_img_path, "rb") as ref_file:
+            result = client.images.edit(
+                model="gpt-image-1-mini",
+                image=[ref_file],
+                prompt=prompt,
+                size=image_size,
+                quality="medium",
+            )
+    else:
+        result = client.images.generate(
+            model="gpt-image-1-mini",
+            prompt=prompt,
+            size=image_size,
+            quality="medium",
+        )
 
-    # Save corrected image
-    sn = req.scene_number
-    story_dir = os.path.join(STORIES_DIR, req.story_id)
+    # Save corrected image — sn and story_dir already set above
 
     # Backup original
     for ext in ["_raw.png", "_web.jpg", ".jpg"]:
