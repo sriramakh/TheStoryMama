@@ -2185,12 +2185,88 @@ textarea { min-height: 120px; resize: vertical; }
 
   <!-- QC Review -->
   <div id="qcReview" class="hidden" style="margin-top:20px;">
-    <h3 style="font-size:16px; color:#654321; margin-bottom:12px;">Quality Review</h3>
+    <h3 style="font-size:16px; color:#654321; margin-bottom:12px;">Quality Review — click any image to fix</h3>
     <div class="qc-grid" id="qcGrid"></div>
-    <div style="margin-top:16px;">
-      <button class="btn btn-primary" onclick="publishStory()">Approve & Publish</button>
-      <button class="btn btn-secondary" onclick="openVideoGen()" style="margin-left:8px;">Generate Video</button>
+
+    <!-- Inline correction panel -->
+    <div id="inlineCorrection" class="hidden" style="margin-top:16px; background:#FFF9EB; border-radius:12px; padding:16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <h4 style="font-size:14px; color:#654321;">Fix Scene <span id="fixSceneNum"></span></h4>
+        <button style="font-size:11px; padding:4px 10px; background:#EDE5D8; border:none; border-radius:6px; cursor:pointer;" onclick="closeInlineCorrection()">Cancel</button>
+      </div>
+      <div style="display:flex; gap:12px; margin-bottom:10px;">
+        <img id="fixSceneImg" style="height:150px; border-radius:8px;">
+      </div>
+      <textarea id="fixFeedback" placeholder="Describe what needs to be fixed..." style="min-height:60px;"></textarea>
+      <button class="btn btn-primary" onclick="submitInlineFix()" style="margin-top:8px; font-size:13px; padding:8px 16px;">Regenerate Scene</button>
+      <div id="fixProgress" class="hidden" style="margin-top:8px;">
+        <div class="progress-bar"><div class="progress-fill" id="fixProgressFill"></div></div>
+        <div class="progress-msg" id="fixProgressMsg">Fixing...</div>
+      </div>
     </div>
+
+    <div style="margin-top:16px; display:flex; gap:8px;">
+      <button class="btn btn-primary" onclick="publishStory()">Approve & Publish</button>
+    </div>
+  </div>
+
+  <!-- Inline Video Generation -->
+  <div id="videoSection" class="hidden" style="margin-top:20px;">
+    <h3 style="font-size:16px; color:#654321; margin-bottom:12px;">Generate Video Reel</h3>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+      <div>
+        <label>Voice</label>
+        <select id="buildVoice">
+          <option value="nova">Nova (gentle)</option>
+          <option value="sage">Sage (playful)</option>
+        </select>
+      </div>
+      <div>
+        <label>Background Music</label>
+        <select id="buildBgm">
+          <option value="Joyful">Joyful</option>
+          <option value="Playful">Playful</option>
+          <option value="Enchanted">Enchanted</option>
+          <option value="Adventurous1">Adventurous 1</option>
+          <option value="Adventurous2">Adventurous 2</option>
+        </select>
+      </div>
+      <div>
+        <label>Voice Speed</label>
+        <div class="slider-row" style="display:flex; align-items:center; gap:8px;">
+          <input type="range" id="buildTempo" min="0.7" max="1.0" step="0.05" value="0.9" style="flex:1;">
+          <span id="buildTempoVal" style="font-size:12px; min-width:30px;">0.9x</span>
+        </div>
+      </div>
+      <div>
+        <label>Voice Volume</label>
+        <div class="slider-row" style="display:flex; align-items:center; gap:8px;">
+          <input type="range" id="buildTtsVol" min="0.3" max="2.0" step="0.05" value="1.05" style="flex:1;">
+          <span id="buildTtsVolVal" style="font-size:12px; min-width:30px;">1.05</span>
+        </div>
+      </div>
+      <div>
+        <label>BGM Volume</label>
+        <div class="slider-row" style="display:flex; align-items:center; gap:8px;">
+          <input type="range" id="buildBgmVol" min="0.01" max="0.5" step="0.005" value="0.097" style="flex:1;">
+          <span id="buildBgmVolVal" style="font-size:12px; min-width:30px;">0.097</span>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:12px;">
+      <button class="btn btn-primary" onclick="generateBuildVideo()">Generate Video</button>
+    </div>
+    <div id="buildVideoProgress" class="progress-container hidden" style="margin-top:12px;">
+      <div class="progress-bar"><div class="progress-fill" id="buildVideoFill"></div></div>
+      <div class="progress-msg" id="buildVideoMsg">Starting...</div>
+    </div>
+    <div id="buildVideoPreview" class="hidden" style="margin-top:12px;">
+      <video id="buildVideoPlayer" controls style="width:100%; max-height:400px; border-radius:12px; background:#000;"></video>
+      <div style="margin-top:8px; display:flex; gap:8px;">
+        <a id="buildVideoDownload" style="display:none;"><button class="btn btn-primary" style="font-size:13px; padding:8px 16px;">Download Video</button></a>
+      </div>
+    </div>
+    <div id="buildCaptions" class="hidden" style="margin-top:16px;"></div>
   </div>
 
   <div id="singleStatus"></div>
@@ -2466,9 +2542,12 @@ function updateBatchProgress(pct, msg) {
   document.getElementById('batchProgressMsg').textContent = msg + ' (' + pct + '%)';
 }
 
+let currentStoryId = null;
+let fixingSceneNum = null;
+
 function showQCReview(jobData) {
   document.getElementById('qcReview').classList.remove('hidden');
-  const storyId = jobData.result.story_id;
+  currentStoryId = jobData.result.story_id;
   const scores = jobData.qc_scores || [];
 
   const grid = document.getElementById('qcGrid');
@@ -2478,8 +2557,8 @@ function showQCReview(jobData) {
     const color = score >= 0.75 ? '#2D5F4A' : '#C94B4B';
     const bg = score >= 0.75 ? '#D4F5E9' : '#FFE0E0';
     return `
-    <div class="qc-item" onclick="window.open('/qc', '_blank')">
-      <img src="/api/stories/${storyId}/image/${s.scene_number}" loading="lazy">
+    <div class="qc-item" onclick="openInlineFix(${s.scene_number}, '${currentStoryId}')">
+      <img src="/api/stories/${currentStoryId}/image/${s.scene_number}?t=${Date.now()}" loading="lazy">
       <div class="info">
         <span>Scene ${s.scene_number}</span>
         <span class="score" style="background:${bg}; color:${color};">${score ? score.toFixed(2) : 'N/A'}</span>
@@ -2487,18 +2566,173 @@ function showQCReview(jobData) {
     </div>`;
   }).join('');
 
-  currentJobId = jobData.result.story_id;
-  document.getElementById('singleStatus').innerHTML = '<div class="status info">Review images above. Click any to open QC tool. When ready, click Approve & Publish.</div>';
+  document.getElementById('singleStatus').innerHTML = '<div class="status info">Click any image to fix it. When satisfied, click Approve & Publish.</div>';
+}
+
+function openInlineFix(sceneNum, storyId) {
+  fixingSceneNum = sceneNum;
+  document.getElementById('inlineCorrection').classList.remove('hidden');
+  document.getElementById('fixSceneNum').textContent = '#' + sceneNum;
+  document.getElementById('fixSceneImg').src = '/api/stories/' + storyId + '/image/' + sceneNum + '?t=' + Date.now();
+  document.getElementById('fixFeedback').value = '';
+  document.getElementById('fixProgress').classList.add('hidden');
+  document.getElementById('inlineCorrection').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function closeInlineCorrection() {
+  document.getElementById('inlineCorrection').classList.add('hidden');
+}
+
+function submitInlineFix() {
+  if (!currentStoryId || !fixingSceneNum) return;
+  const feedback = document.getElementById('fixFeedback').value.trim();
+  if (!feedback) { alert('Describe what needs fixing'); return; }
+
+  document.getElementById('fixProgress').classList.remove('hidden');
+  document.getElementById('fixProgressFill').style.width = '10%';
+  document.getElementById('fixProgressMsg').textContent = 'Regenerating...';
+
+  fetch('/api/correct-scene', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ story_id: currentStoryId, scene_number: fixingSceneNum, feedback: feedback }),
+  }).then(r => r.json()).then(data => {
+    if (data.job_id) pollFixJob(data.job_id);
+  }).catch(e => {
+    document.getElementById('fixProgressMsg').textContent = 'Error: ' + e.message;
+  });
+}
+
+function pollFixJob(jobId) {
+  fetch('/api/job/' + jobId).then(r => r.json()).then(data => {
+    document.getElementById('fixProgressFill').style.width = data.progress + '%';
+    document.getElementById('fixProgressMsg').textContent = data.message + ' (' + data.progress + '%)';
+
+    if (data.status === 'done') {
+      document.getElementById('fixProgress').classList.add('hidden');
+      closeInlineCorrection();
+      // Refresh QC grid images
+      document.querySelectorAll('.qc-item img').forEach(img => {
+        img.src = img.src.split('?')[0] + '?t=' + Date.now();
+      });
+      document.getElementById('singleStatus').innerHTML = '<div class="status success">Scene fixed!</div>';
+    } else if (data.status === 'failed') {
+      document.getElementById('fixProgressMsg').textContent = 'Failed: ' + data.message;
+    } else {
+      setTimeout(() => pollFixJob(jobId), 1500);
+    }
+  }).catch(() => setTimeout(() => pollFixJob(jobId), 2000));
 }
 
 function publishStory() {
-  if (!currentJobId) return;
-  document.getElementById('singleStatus').innerHTML = '<div class="status success">Story published to thestorymama.club!</div>';
-  document.getElementById('qcReview').classList.add('hidden');
+  if (!currentStoryId) return;
+  document.getElementById('singleStatus').innerHTML = '<div class="status success">Story published to thestorymama.club! <a href="https://www.thestorymama.club/stories/' + currentStoryId + '" target="_blank">View story</a></div>';
+  // Show video section
+  document.getElementById('videoSection').classList.remove('hidden');
+  document.getElementById('videoSection').scrollIntoView({ behavior: 'smooth' });
 }
 
-function openVideoGen() {
-  window.open('/', '_blank');
+// Inline video generation
+document.getElementById('buildTempo').addEventListener('input', e => { document.getElementById('buildTempoVal').textContent = e.target.value + 'x'; });
+document.getElementById('buildTtsVol').addEventListener('input', e => { document.getElementById('buildTtsVolVal').textContent = e.target.value; });
+document.getElementById('buildBgmVol').addEventListener('input', e => { document.getElementById('buildBgmVolVal').textContent = e.target.value; });
+
+function generateBuildVideo() {
+  if (!currentStoryId) return;
+  document.getElementById('buildVideoProgress').classList.remove('hidden');
+  document.getElementById('buildVideoPreview').classList.add('hidden');
+  document.getElementById('buildCaptions').classList.add('hidden');
+
+  const body = {
+    story_id: currentStoryId,
+    voice: document.getElementById('buildVoice').value,
+    bgm: document.getElementById('buildBgm').value,
+    tts_volume: parseFloat(document.getElementById('buildTtsVol').value),
+    tts_tempo: parseFloat(document.getElementById('buildTempo').value),
+    bgm_volume: parseFloat(document.getElementById('buildBgmVol').value),
+    include_intro: true,
+    include_outro: true,
+  };
+
+  fetch('/api/generate-reel', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  }).then(r => r.json()).then(data => {
+    if (data.job_id) pollBuildVideoJob(data.job_id);
+  });
+}
+
+function pollBuildVideoJob(jobId) {
+  fetch('/api/job/' + jobId).then(r => r.json()).then(data => {
+    document.getElementById('buildVideoFill').style.width = data.progress + '%';
+    document.getElementById('buildVideoMsg').textContent = data.message + ' (' + data.progress + '%)';
+
+    if (data.status === 'done' && data.result) {
+      document.getElementById('buildVideoProgress').classList.add('hidden');
+      document.getElementById('buildVideoPreview').classList.remove('hidden');
+      document.getElementById('buildVideoPlayer').src = data.result.url;
+      const dl = document.getElementById('buildVideoDownload');
+      dl.href = data.result.url;
+      dl.download = data.result.filename;
+      dl.style.display = 'inline';
+
+      // Show captions
+      if (data.result.captions) {
+        const c = data.result.captions;
+        document.getElementById('buildCaptions').classList.remove('hidden');
+        document.getElementById('buildCaptions').innerHTML = `
+          <h4 style="font-size:14px; color:#654321; margin-bottom:10px;">Social Media Captions</h4>
+          <div style="background:#FFF9EB; border-radius:10px; padding:12px; margin-bottom:8px;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+              <span style="font-size:12px; font-weight:600; color:#654321;">Instagram</span>
+              <button style="font-size:11px; padding:2px 8px; border:1px solid #EDE5D8; border-radius:6px; background:white; cursor:pointer;" onclick="copyText(this, 'buildIg')">Copy</button>
+            </div>
+            <pre id="buildIg" style="font-size:12px; white-space:pre-wrap; word-wrap:break-word; font-family:inherit; margin:0;">${c.instagram_caption || ''}</pre>
+          </div>
+          <div style="background:#FFF9EB; border-radius:10px; padding:12px; margin-bottom:8px;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+              <span style="font-size:12px; font-weight:600; color:#654321;">YouTube Title</span>
+              <button style="font-size:11px; padding:2px 8px; border:1px solid #EDE5D8; border-radius:6px; background:white; cursor:pointer;" onclick="copyText(this, 'buildYtTitle')">Copy</button>
+            </div>
+            <pre id="buildYtTitle" style="font-size:12px; white-space:pre-wrap; font-family:inherit; margin:0;">${c.youtube_title || ''}</pre>
+          </div>
+          <div style="background:#FFF9EB; border-radius:10px; padding:12px; margin-bottom:8px;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+              <span style="font-size:12px; font-weight:600; color:#654321;">YouTube Description</span>
+              <button style="font-size:11px; padding:2px 8px; border:1px solid #EDE5D8; border-radius:6px; background:white; cursor:pointer;" onclick="copyText(this, 'buildYtDesc')">Copy</button>
+            </div>
+            <pre id="buildYtDesc" style="font-size:12px; white-space:pre-wrap; font-family:inherit; margin:0;">${c.youtube_description || ''}</pre>
+          </div>
+          <div style="background:#FFF9EB; border-radius:10px; padding:12px;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+              <span style="font-size:12px; font-weight:600; color:#654321;">Pinterest</span>
+              <button style="font-size:11px; padding:2px 8px; border:1px solid #EDE5D8; border-radius:6px; background:white; cursor:pointer;" onclick="copyText(this, 'buildPin')">Copy</button>
+            </div>
+            <pre id="buildPin" style="font-size:12px; white-space:pre-wrap; font-family:inherit; margin:0;">${c.pinterest_description || ''}</pre>
+          </div>`;
+      }
+    } else if (data.status === 'failed') {
+      document.getElementById('buildVideoMsg').textContent = 'Failed: ' + data.message;
+    } else {
+      setTimeout(() => pollBuildVideoJob(jobId), 1500);
+    }
+  }).catch(() => setTimeout(() => pollBuildVideoJob(jobId), 2000));
+}
+
+function copyText(btn, elementId) {
+  const text = document.getElementById(elementId).textContent;
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand('copy');
+  document.body.removeChild(ta);
+  btn.textContent = 'Copied!';
+  btn.style.background = '#D4F5E9';
+  setTimeout(() => { btn.textContent = 'Copy'; btn.style.background = 'white'; }, 2000);
 }
 
 function startBatchBuild() {
