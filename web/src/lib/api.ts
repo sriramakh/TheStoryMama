@@ -30,6 +30,7 @@ export async function getLibraryStories(params: {
   category?: string;
   style?: string;
   search?: string;
+  orientation?: string;
 }): Promise<StoryListResponse> {
   const searchParams = new URLSearchParams();
   if (params.page) searchParams.set("page", String(params.page));
@@ -37,6 +38,7 @@ export async function getLibraryStories(params: {
   if (params.category) searchParams.set("category", params.category);
   if (params.style) searchParams.set("style", params.style);
   if (params.search) searchParams.set("search", params.search);
+  if (params.orientation) searchParams.set("orientation", params.orientation);
   return fetchAPI<StoryListResponse>(
     `/api/v1/library?${searchParams.toString()}`
   );

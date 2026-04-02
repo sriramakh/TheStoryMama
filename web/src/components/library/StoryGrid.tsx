@@ -7,12 +7,14 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 interface StoryGridProps {
   category?: string;
   search?: string;
+  orientation?: string;
   page?: number;
 }
 
 export async function StoryGrid({
   category,
   search,
+  orientation,
   page = 1,
 }: StoryGridProps) {
   let stories;
@@ -24,6 +26,7 @@ export async function StoryGrid({
       per_page: 20,
       category,
       search,
+      orientation,
     });
   } catch (e) {
     error = e instanceof Error ? e.message : "Failed to load stories";
@@ -61,6 +64,7 @@ export async function StoryGrid({
     params.set("page", String(p));
     if (category) params.set("category", category);
     if (search) params.set("search", search);
+    if (orientation) params.set("orientation", orientation);
     return `/library?${params.toString()}`;
   }
 

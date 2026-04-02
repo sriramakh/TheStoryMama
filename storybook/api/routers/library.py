@@ -270,9 +270,26 @@ def _categorize_story(story_data: dict) -> list[str]:
     return categories[:4]
 
 
+def _detect_orientation(folder_name: str) -> str:
+    """Detect portrait or landscape from scene 1 image."""
+    story_dir = os.path.join(Config.OUTPUT_DIR, folder_name)
+    for ext in ["_web.jpg", "_raw.png", ".jpg"]:
+        img_path = os.path.join(story_dir, f"scene_01{ext}")
+        if os.path.exists(img_path):
+            try:
+                from PIL import Image as PILImage
+                with PILImage.open(img_path) as img:
+                    w, h = img.size
+                    return "landscape" if w > h else "portrait"
+            except:
+                pass
+    return "portrait"  # default
+
+
 def _story_to_dict(folder_name: str, story_data: dict) -> dict:
     """Convert a story JSON + folder name to API response dict."""
     categories = _categorize_story(story_data)
+    orientation = _detect_orientation(folder_name)
 
     return {
         "id": folder_name,
@@ -284,6 +301,7 @@ def _story_to_dict(folder_name: str, story_data: dict) -> dict:
         "category": categories[0],  # Primary category (backwards compat)
         "categories": categories,   # All categories
         "tags": categories,         # Tags = categories for filtering
+        "orientation": orientation,  # "portrait" or "landscape"
         "cover_image_url": f"/api/v1/stories/{folder_name}/scenes/1/image",
         "scene_count": len(story_data.get("scenes", [])),
         "created_at": None,
@@ -339,6 +357,7 @@ def list_library_stories(
     category: str | None = None,
     style: str | None = None,
     search: str | None = None,
+    orientation: str | None = None,
 ):
     """Browse the public story library with filters."""
     all_stories = _load_all_stories()
@@ -353,6 +372,8 @@ def list_library_stories(
     if category:
         # Match stories that have this category in their categories list
         filtered = [s for s in filtered if category in s.get("categories", [])]
+    if orientation:
+        filtered = [s for s in filtered if s.get("orientation") == orientation]
     if style:
         filtered = [s for s in filtered if s["animation_style"] == style]
     if search:

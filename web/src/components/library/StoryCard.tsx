@@ -40,6 +40,14 @@ export function StoryCard({ story }: { story: Story }) {
                   {cat}
                 </Badge>
               ))}
+            {story.orientation === "landscape" && (
+              <Badge
+                variant="secondary"
+                className="text-[10px] bg-[var(--color-pastel-sky)] text-blue-700 px-2 py-0.5"
+              >
+                Landscape
+              </Badge>
+            )}
             {story.scene_count && (
               <span className="text-[10px] text-muted-foreground ml-auto">
                 {story.scene_count} scenes

@@ -84,6 +84,7 @@ export default async function LibraryPage({
           <StoryGrid
             category={params.category}
             search={params.search}
+            orientation={params.orientation}
             page={params.page ? parseInt(params.page) : 1}
           />
         </Suspense>

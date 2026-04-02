@@ -24,6 +24,7 @@ export interface Story {
   category?: string;
   categories?: string[];
   tags?: string[];
+  orientation?: "portrait" | "landscape";
   cover_image_url?: string;
   scene_count?: number;
   created_at?: string;
