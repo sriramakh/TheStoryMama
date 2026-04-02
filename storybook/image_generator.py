@@ -579,9 +579,7 @@ IMPORTANT — CHARACTER VISUAL REFERENCE (how each character ACTUALLY looks — 
 
             prompt = f"""{style['description']}
 
-The attached images are PREVIOUS SCENES from this storybook. Match the character designs EXACTLY — same species, face, skin/fur color, clothing, proportions.
-
-{sheet_section}INCLUDE — draw ONLY these characters, matching their appearance from the reference images:
+{sheet_section}INCLUDE — draw ONLY these characters with IDENTICAL appearance (same face, skin/fur color, clothing):
 {present_block}
 
 BACKGROUND: {background}
@@ -591,10 +589,18 @@ SCENE {scene['scene_number']} of {len(scenes)}:
 
 {scene_type}
 
+COMPOSITION — THIS IS CRITICAL:
+- Create a UNIQUE composition for this scene — different camera angle, different character positions
+- Characters should be in DIFFERENT poses and positions than previous scenes
+- Vary character expressions to match the specific action described
+- Use dynamic framing: close-up, wide shot, side view, over-the-shoulder — NOT always centered front-facing
+- The background MUST be visually distinct and match the specific location described
+
 RULES:
 - {style['image_rules']}
 - Draw EXACTLY {num_chars_in_scene} characters in this scene — no more, no less{exclude_rule}
-- Every character MUST look IDENTICAL to the reference images — same species, same face, same skin/fur color, same clothing, same accessories
+- Character APPEARANCE must match the visual reference (same face, colors, clothing)
+- But character POSE, POSITION, and EXPRESSION must be unique to THIS scene
 - Warm, friendly expressions appropriate for a children's book
 - Suitable for a 2-4 year old child
 - DO NOT include any text, words, letters, or numbers in the image"""
@@ -623,36 +629,10 @@ RULES:
                     "quality": "medium",
                 }
 
-                # For scenes 2+: use images.edit() with reference images
-                use_edit = scene_index > 0 and self._reference_image_path
-                ref_images = []
-
-                if use_edit:
-                    try:
-                        # Always include scene 1 (character anchor)
-                        ref_images.append(open(self._reference_image_path, "rb"))
-
-                        # Include previous 1-2 scenes for continuity
-                        for prev_path in self._recent_scene_paths[-2:]:
-                            if prev_path != self._reference_image_path and os.path.exists(prev_path):
-                                ref_images.append(open(prev_path, "rb"))
-                    except Exception as ref_e:
-                        print(f"   Warning: Could not load reference images: {ref_e}")
-                        use_edit = False
-
-                if use_edit and ref_images:
-                    result = self.openai_client.images.edit(
-                        model="gpt-image-1-mini",
-                        image=ref_images,
-                        prompt=prompt,
-                        size=self.size,
-                        quality="medium",
-                    )
-                    # Close file handles
-                    for fh in ref_images:
-                        fh.close()
-                else:
-                    result = self.openai_client.images.generate(**api_params)
+                # Always use images.generate() for scene creation
+                # (images.edit() copies poses/positions from reference — kills variety)
+                # Character consistency comes from the text-based visual sheet in the prompt
+                result = self.openai_client.images.generate(**api_params)
 
                 image_bytes = base64.b64decode(result.data[0].b64_json)
                 with open(output_path, "wb") as f:
