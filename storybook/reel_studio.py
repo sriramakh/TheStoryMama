@@ -2171,11 +2171,16 @@ textarea { min-height: 120px; resize: vertical; }
     <div class="progress-msg" id="singleProgressMsg">Starting...</div>
   </div>
 
-  <!-- Scene Review (manual mode) -->
+  <!-- Scene Review -->
   <div id="sceneReview" class="hidden" style="margin-top:20px;">
-    <h3 style="font-size:16px; color:#654321; margin-bottom:12px;">Review Scenes</h3>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+      <h3 style="font-size:16px; color:#654321;">Review Scenes</h3>
+      <button class="btn btn-secondary" onclick="regenerateStory()" style="font-size:12px; padding:6px 14px;">Regenerate Entire Story</button>
+    </div>
     <div id="sceneList"></div>
-    <button class="btn btn-primary" onclick="approveScenes()" style="margin-top:12px;">Approve & Generate Images</button>
+    <div style="margin-top:12px; display:flex; gap:8px;">
+      <button class="btn btn-primary" onclick="approveScenes()">Approve & Generate Images</button>
+    </div>
   </div>
 
   <!-- QC Review -->
@@ -2299,62 +2304,100 @@ function startSingleBuild() {
   document.getElementById('qcReview').classList.add('hidden');
   document.getElementById('sceneReview').classList.add('hidden');
 
-  if (buildMode === 'manual' && desc) {
-    // Manual: generate story text first for review
-    updateSingleProgress(5, 'Generating story text...');
-    fetch('/api/build/generate-story', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({description: desc, num_scenes: scenes, style: selectedStyle, layout: selectedLayout}),
-    }).then(r => r.json()).then(data => {
-      currentStory = data.story;
-      showSceneReview(data.story);
-      document.getElementById('singleProgress').classList.add('hidden');
-      document.getElementById('btnBuildSingle').disabled = false;
-    }).catch(e => {
-      document.getElementById('singleStatus').innerHTML = '<div class="status error">Error: ' + e.message + '</div>';
-      document.getElementById('btnBuildSingle').disabled = false;
-    });
-    return;
-  }
-
-  // Auto mode: full pipeline
-  fetch('/api/build/single', {
+  // Both auto and manual: generate story text first for review
+  updateSingleProgress(5, 'Generating story text...');
+  fetch('/api/build/generate-story', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({mode: 'auto', description: desc || null, num_scenes: scenes, style: selectedStyle, layout: selectedLayout}),
+    body: JSON.stringify({description: desc || null, num_scenes: scenes, style: selectedStyle, layout: selectedLayout, mode: buildMode}),
   }).then(r => r.json()).then(data => {
-    currentJobId = data.job_id;
-    pollBuildJob(data.job_id, 'single');
+    currentStory = data.story;
+    showSceneReview(data.story);
+    document.getElementById('singleProgress').classList.add('hidden');
+    document.getElementById('btnBuildSingle').disabled = false;
+  }).catch(e => {
+    document.getElementById('singleStatus').innerHTML = '<div class="status error">Error: ' + e.message + '</div>';
+    document.getElementById('btnBuildSingle').disabled = false;
+    document.getElementById('singleProgress').classList.add('hidden');
   });
 }
 
 function showSceneReview(story) {
   document.getElementById('sceneReview').classList.remove('hidden');
   const list = document.getElementById('sceneList');
-  list.innerHTML = '<p style="font-size:14px; font-weight:600; color:#654321; margin-bottom:8px;">' + story.title + '</p>' +
+  list.innerHTML = `
+    <div style="background:#FFF9EB; border-radius:10px; padding:12px; margin-bottom:12px;">
+      <p style="font-size:16px; font-weight:700; color:#654321;">${story.title}</p>
+      <p style="font-size:12px; color:#8B7D6B; margin-top:4px;">Characters: ${story.characters.map(c => c.name + ' (' + c.type + ')').join(', ')}</p>
+      ${story.moral ? '<p style="font-size:12px; color:#8B7D6B; margin-top:2px;">Moral: ' + story.moral + '</p>' : ''}
+    </div>` +
     story.scenes.map(s => `
-    <div class="scene-card">
+    <div class="scene-card" id="sceneCard-${s.scene_number}">
       <div class="scene-header">
-        <span class="scene-num">Scene ${s.scene_number}</span>
-        <button class="btn" style="font-size:11px; padding:4px 10px; background:#E8D5F5; color:#5B4370;" onclick="editScene(${s.scene_number})">Edit</button>
+        <span class="scene-num">Scene ${s.scene_number} of ${story.scenes.length}</span>
+        <div style="display:flex; gap:4px;">
+          <button style="font-size:11px; padding:4px 10px; background:#E8D5F5; color:#5B4370; border:none; border-radius:6px; cursor:pointer;" onclick="toggleEditScene(${s.scene_number})">Edit</button>
+          <button style="font-size:11px; padding:4px 10px; background:#FFE0E0; color:#C94B4B; border:none; border-radius:6px; cursor:pointer; display:none;" id="saveBtn-${s.scene_number}" onclick="saveScene(${s.scene_number})">Save</button>
+        </div>
       </div>
       <div class="scene-text" id="sceneText-${s.scene_number}">${s.text}</div>
-      <textarea id="sceneEdit-${s.scene_number}" class="hidden" onchange="markEdited(${s.scene_number})">${s.text}</textarea>
+      <textarea id="sceneEdit-${s.scene_number}" class="hidden">${s.text}</textarea>
     </div>
   `).join('');
 }
 
-function editScene(num) {
-  document.getElementById('sceneText-' + num).classList.add('hidden');
-  document.getElementById('sceneEdit-' + num).classList.remove('hidden');
+function toggleEditScene(num) {
+  const textEl = document.getElementById('sceneText-' + num);
+  const editEl = document.getElementById('sceneEdit-' + num);
+  const saveBtn = document.getElementById('saveBtn-' + num);
+  const isEditing = !editEl.classList.contains('hidden');
+
+  if (isEditing) {
+    // Cancel edit
+    editEl.classList.add('hidden');
+    textEl.classList.remove('hidden');
+    saveBtn.style.display = 'none';
+  } else {
+    // Start edit
+    editEl.classList.remove('hidden');
+    editEl.value = textEl.textContent;
+    textEl.classList.add('hidden');
+    saveBtn.style.display = 'inline-block';
+  }
 }
 
-function markEdited(num) {
+function saveScene(num) {
   const newText = document.getElementById('sceneEdit-' + num).value;
   for (let s of currentStory.scenes) {
     if (s.scene_number === num) { s.text = newText; break; }
   }
+  document.getElementById('sceneText-' + num).textContent = newText;
+  document.getElementById('sceneEdit-' + num).classList.add('hidden');
+  document.getElementById('sceneText-' + num).classList.remove('hidden');
+  document.getElementById('saveBtn-' + num).style.display = 'none';
+  document.getElementById('sceneCard-' + num).style.borderLeft = '3px solid #E8829A';
+}
+
+function regenerateStory() {
+  const desc = document.getElementById('storyDesc').value.trim();
+  const scenes = parseInt(document.getElementById('sceneCount').value);
+
+  document.getElementById('sceneReview').classList.add('hidden');
+  document.getElementById('singleProgress').classList.remove('hidden');
+  updateSingleProgress(5, 'Regenerating story...');
+
+  fetch('/api/build/generate-story', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({description: desc || null, num_scenes: scenes, style: selectedStyle, layout: selectedLayout, mode: buildMode}),
+  }).then(r => r.json()).then(data => {
+    currentStory = data.story;
+    showSceneReview(data.story);
+    document.getElementById('singleProgress').classList.add('hidden');
+  }).catch(e => {
+    document.getElementById('singleStatus').innerHTML = '<div class="status error">Error: ' + e.message + '</div>';
+    document.getElementById('singleProgress').classList.add('hidden');
+  });
 }
 
 function approveScenes() {
