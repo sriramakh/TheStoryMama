@@ -47,6 +47,21 @@ CHARACTER RULES:
 5. Character descriptions must be EXTREMELY specific and visual: exact species, exact colors,
    exact clothing, exact accessories. An artist must be able to draw them identically in every scene.
 
+CHARACTER DIVERSITY — THIS IS CRITICAL:
+6. For HUMAN characters, you MUST vary their appearance across stories. Rotate through:
+   - SKIN TONES: dark brown, medium brown, light brown, olive, tan, fair, pale, warm beige
+     Do NOT default to the same skin tone every time.
+   - HAIR: straight black, curly brown, wavy auburn, tight coils, red braids, blonde pigtails,
+     short buzz cut, long ponytail, buns, afro, shoulder-length waves, spiky
+   - CLOTHING: vary colors (green, orange, purple, teal, red, navy, coral — NOT always pink/yellow),
+     vary styles (overalls, striped shirt, denim jacket, hoodie, sundress, polo, sweater vest,
+     patterned skirt, boots, sneakers, sandals, rain boots)
+   - ACCESSORIES: vary (backpack, headband, glasses, scarf, hat, bracelet, bandana, bow tie,
+     suspenders, necklace, watch — NOT always the same accessory)
+   - BODY TYPES: vary heights, builds — some stocky, some tall and thin, some small and round
+   For ANIMAL characters, vary fur/feather patterns, sizes, and accessories similarly.
+   The goal: if someone reads 10 stories, every main character should LOOK DISTINCTLY DIFFERENT.
+
 PLOT RULES:
 6. Stories MUST have a real plot arc: a beginning that hooks, a middle with rising action and
    genuine tension (age-appropriate), a climax moment, and a satisfying resolution.
@@ -408,6 +423,31 @@ class StoryGenerator:
                 f"ART DIRECTION: The illustrations will be rendered in {art_style_hint}. "
                 "Keep your art_style field consistent with this direction."
             )
+
+        # Inject random appearance diversity hints to prevent same-looking characters
+        skin_tones = ["dark brown", "medium brown", "light brown", "olive", "tan",
+                      "warm beige", "fair", "deep brown", "golden brown", "caramel"]
+        hair_styles = ["curly black hair in puffs", "straight brown hair in a ponytail",
+                       "wavy auburn hair with a headband", "short spiky red hair",
+                       "long braided black hair", "messy blonde curls",
+                       "tight coils in two buns", "straight black bob cut",
+                       "wavy brown hair to shoulders", "curly ginger hair with freckles"]
+        clothing_styles = ["green overalls and orange sneakers", "purple hoodie and denim shorts",
+                          "teal striped shirt and brown boots", "red polka-dot dress and white sandals",
+                          "navy blue jacket over a yellow tee", "coral sweater and gray leggings",
+                          "orange dungarees and rain boots", "white polo and khaki shorts",
+                          "floral skirt and denim vest", "maroon cardigan and plaid skirt"]
+
+        skin = random.choice(skin_tones)
+        hair = random.choice(hair_styles)
+        clothes = random.choice(clothing_styles)
+        parts.append(
+            f"APPEARANCE DIVERSITY HINT (for any human characters in this story):\n"
+            f"If the story has a main child character, consider giving them: {skin} skin, "
+            f"{hair}, wearing {clothes}. You don't have to follow this exactly, "
+            f"but use it as inspiration to create a UNIQUE-LOOKING character that doesn't "
+            f"look like a generic default. Vary from the typical curly-brown-hair-pink-dress look."
+        )
 
         user_content = "\n\n".join(parts)
 
