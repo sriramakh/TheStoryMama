@@ -2037,7 +2037,7 @@ def _build_single(req: BuildSingleRequest, job_id: str):
 
 
 def _build_batch(req: BuildBatchRequest, job_id: str):
-    """Execute batch story generation."""
+    """Execute batch story generation with all improvements."""
     from story_generator import StoryGenerator
     from image_generator import ImageGenerator
     from text_overlay import TextOverlay
@@ -2049,33 +2049,44 @@ def _build_batch(req: BuildBatchRequest, job_id: str):
     style_key = req.style
     style = Config.ANIMATION_STYLES.get(style_key, Config.ANIMATION_STYLES["animation_movie"])
     image_size = _get_image_size(req.layout)
+    orientation = "landscape" if req.layout == "landscape" else "portrait"
     generator = StoryGenerator()
 
+    # Track generated titles to avoid repetition within batch
+    generated_titles = set()
     completed_stories = []
 
     for story_idx in range(req.count):
         build_jobs[job_id].update({
             "progress": int(100 * story_idx / req.count),
-            "message": f"Story {story_idx + 1}/{req.count}: Generating...",
+            "message": f"Story {story_idx + 1}/{req.count}: Writing story...",
             "stories_completed": story_idx,
         })
 
         try:
-            # Generate story
-            story = generator.generate_story(
-                num_scenes=12,
-                art_style_hint=style["story_art_style"],
-            )
+            # Generate story — retry if title repeats
+            story = None
+            for attempt in range(3):
+                story = generator.generate_story(
+                    num_scenes=12,
+                    art_style_hint=style["story_art_style"],
+                )
+                if story["title"].lower() not in generated_titles:
+                    break
+                print(f"  Title '{story['title']}' already used, retrying...")
+
             story["animation_style"] = style_key
+            story["orientation"] = orientation
+            generated_titles.add(story["title"].lower())
 
             build_jobs[job_id]["message"] = f"Story {story_idx + 1}/{req.count}: {story['title']} — painting..."
 
-            # Create folder
+            # Create folder and save
             serial = get_next_story_number(Config.OUTPUT_DIR)
             folder = create_story_folder(Config.OUTPUT_DIR, serial, story["title"])
             save_story_json(story, folder)
 
-            # Generate images
+            # Generate images with correct size
             old_size = Config.IMAGE_SIZE
             Config.IMAGE_SIZE = image_size
             img_gen = ImageGenerator(animation_style=style)
@@ -2102,12 +2113,15 @@ def _build_batch(req: BuildBatchRequest, job_id: str):
                 "story_id": story_id,
                 "title": story["title"],
                 "scenes": len(story["scenes"]),
+                "orientation": orientation,
             })
 
             build_jobs[job_id]["stories"] = completed_stories
             time.sleep(3)
 
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             print(f"Batch story {story_idx + 1} failed: {e}")
             completed_stories.append({"title": f"Failed: {str(e)[:50]}", "story_id": None})
 
