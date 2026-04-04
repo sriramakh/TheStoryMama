@@ -2388,9 +2388,9 @@ textarea { min-height: 120px; resize: vertical; }
     <div class="layout-btn" id="modeManual" onclick="setMode('manual')">Manual Entry</div>
   </div>
 
-  <div id="descriptionSection">
-    <label>Story Description (optional for auto)</label>
-    <textarea id="storyDesc" placeholder="A brave little penguin who dreams of flying..."></textarea>
+  <div id="descriptionSection" style="opacity:0.4; pointer-events:none;">
+    <label>Story Description</label>
+    <textarea id="storyDesc" disabled placeholder="Auto mode generates a random story — switch to Manual to write your own"></textarea>
   </div>
 
   <label>Layout</label>
@@ -2645,6 +2645,18 @@ function setMode(m) {
   buildMode = m;
   document.getElementById('modeAuto').classList.toggle('selected', m === 'auto');
   document.getElementById('modeManual').classList.toggle('selected', m === 'manual');
+  const descSection = document.getElementById('descriptionSection');
+  if (m === 'auto') {
+    descSection.style.opacity = '0.4';
+    descSection.style.pointerEvents = 'none';
+    document.getElementById('storyDesc').disabled = true;
+    document.getElementById('storyDesc').placeholder = 'Auto mode generates a random story — switch to Manual to write your own';
+  } else {
+    descSection.style.opacity = '1';
+    descSection.style.pointerEvents = 'auto';
+    document.getElementById('storyDesc').disabled = false;
+    document.getElementById('storyDesc').placeholder = 'A brave little penguin who dreams of flying...';
+  }
 }
 
 function switchTab(tab) {
