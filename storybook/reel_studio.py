@@ -508,7 +508,8 @@ def _generate_reel_impl(req: ReelRequest, job_id: str):
     if total_segs == 2:
         vf[-1] = vf[-1].replace("[xf1]", "[vout]")
 
-    total_vid = cum + all_segments[-1]["dur"]
+    # Total video = sum of all durations minus overlaps from xfade transitions
+    total_vid = sum(s["dur"] for s in all_segments) - (total_segs - 1) * tr
 
     # Cache video track — same for all BGM/volume combos of this story+voice+intro+outro combo
     intro_flag = "i" if (intro_vid and os.path.exists(intro_vid)) else "n"
