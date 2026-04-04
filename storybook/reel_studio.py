@@ -141,49 +141,96 @@ def generate_tts(story_id, voice):
     return {"cached": len(story["scenes"]) - generated, "generated": generated}
 
 
-def create_intro_video(title, out_path):
-    """Create intro video with title overlay."""
-    intro_template = os.path.join(ASSETS_DIR, "TheStoryMama Intro.mp4")
+def create_intro_video(title, out_path, orientation="portrait"):
+    """Create intro video with title overlay. Supports portrait and landscape."""
+    if orientation == "landscape":
+        intro_template = os.path.join(ASSETS_DIR, "Landscape Intro.mp4")
+    else:
+        intro_template = os.path.join(ASSETS_DIR, "TheStoryMama Intro.mp4")
     if not os.path.exists(intro_template):
         return None
 
     tmp = f"/tmp/reel_intro_{uuid.uuid4().hex[:8]}"
     os.makedirs(tmp, exist_ok=True)
 
+    if orientation == "landscape":
+        vw, vh = 1920, 1080
+    else:
+        vw, vh = W, H
+
     subprocess.run(["ffmpeg", "-y", "-i", intro_template,
-                    "-vf", f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}",
+                    "-vf", f"scale={vw}:{vh}:force_original_aspect_ratio=increase,crop={vw}:{vh}",
                     f"{tmp}/f%04d.png"], capture_output=True)
 
     frames = sorted([f for f in os.listdir(tmp) if f.endswith(".png")])
     fps = 32
-    font = get_font(58)
-    lines = textwrap.wrap(title, width=22)
 
-    for i, fn in enumerate(frames):
-        t = i / fps
-        if t < 1.5:
-            alpha = 0
-        elif t < 2.0:
-            alpha = (t - 1.5) * 2
+    if orientation == "landscape":
+        # Landscape: Palatino Bold 105px, title case, at y=560, fade at 6-8s
+        font_path = "/System/Library/Fonts/Palatino.ttc"
+        if os.path.exists(font_path):
+            font = ImageFont.truetype(font_path, 105, index=1)  # Bold
         else:
-            alpha = 1.0
-        if alpha <= 0:
-            continue
+            font = get_font(105)
+        display_title = title.title()
+        lines = textwrap.wrap(display_title, width=30)
 
-        fp = os.path.join(tmp, fn)
-        img = Image.open(fp).convert("RGBA")
-        ov = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        d = ImageDraw.Draw(ov)
-        a = int(alpha * 255)
-        y = 1120
-        for line in lines:
-            bb = d.textbbox((0, 0), line, font=font)
-            tw = bb[2] - bb[0]
-            d.text(((W - tw) // 2 + 2, y + 2), line, fill=(80, 50, 30, int(a * 0.2)), font=font)
-            d.text(((W - tw) // 2, y), line, fill=(101, 67, 33, a), font=font)
-            y += 70
-        img = Image.alpha_composite(img, ov).convert("RGB")
-        img.save(fp, "PNG")
+        for i, fn in enumerate(frames):
+            t = i / fps
+            if t < 6.0 or t > 8.0:
+                continue
+            # Fade in 6.0-6.5, full 6.5-7.5, fade out 7.5-8.0
+            if t < 6.5:
+                alpha = (t - 6.0) / 0.5
+            elif t > 7.5:
+                alpha = (8.0 - t) / 0.5
+            else:
+                alpha = 1.0
+            alpha = max(0, min(1, alpha))
+
+            fp = os.path.join(tmp, fn)
+            img = Image.open(fp).convert("RGBA")
+            ov = Image.new("RGBA", (vw, vh), (0, 0, 0, 0))
+            d = ImageDraw.Draw(ov)
+            a = int(alpha * 255)
+            y = 560
+            for line in lines:
+                bb = d.textbbox((0, 0), line, font=font)
+                tw = bb[2] - bb[0]
+                d.text(((vw - tw) // 2, y), line, fill=(92, 58, 30, a), font=font)
+                y += 110
+            img = Image.alpha_composite(img, ov).convert("RGB")
+            img.save(fp, "PNG")
+    else:
+        # Portrait: existing behavior
+        font = get_font(58)
+        lines = textwrap.wrap(title, width=22)
+
+        for i, fn in enumerate(frames):
+            t = i / fps
+            if t < 1.5:
+                alpha = 0
+            elif t < 2.0:
+                alpha = (t - 1.5) * 2
+            else:
+                alpha = 1.0
+            if alpha <= 0:
+                continue
+
+            fp = os.path.join(tmp, fn)
+            img = Image.open(fp).convert("RGBA")
+            ov = Image.new("RGBA", (vw, vh), (0, 0, 0, 0))
+            d = ImageDraw.Draw(ov)
+            a = int(alpha * 255)
+            y = 1120
+            for line in lines:
+                bb = d.textbbox((0, 0), line, font=font)
+                tw = bb[2] - bb[0]
+                d.text(((vw - tw) // 2 + 2, y + 2), line, fill=(80, 50, 30, int(a * 0.2)), font=font)
+                d.text(((vw - tw) // 2, y), line, fill=(101, 67, 33, a), font=font)
+                y += 70
+            img = Image.alpha_composite(img, ov).convert("RGB")
+            img.save(fp, "PNG")
 
     subprocess.run(["ffmpeg", "-y", "-framerate", str(fps), "-i", f"{tmp}/f%04d.png",
                     "-c:v", "libx264", "-preset", "fast", "-crf", "23", "-pix_fmt", "yuv420p",
@@ -314,6 +361,23 @@ def _generate_reel_impl(req: ReelRequest, job_id: str):
     with open(story_path) as f:
         story = json.load(f)
 
+    # Detect orientation from story data or first image
+    orientation = story.get("orientation", "portrait")
+    if not orientation or orientation not in ("portrait", "landscape"):
+        # Fallback: detect from first scene image
+        first_img = os.path.join(STORIES_DIR, req.story_id, "scene_01.jpg")
+        if not os.path.exists(first_img):
+            first_img = os.path.join(STORIES_DIR, req.story_id, "scene_01_raw.png")
+        if os.path.exists(first_img):
+            try:
+                with Image.open(first_img) as im:
+                    orientation = "landscape" if im.width > im.height else "portrait"
+            except:
+                orientation = "portrait"
+    is_landscape = orientation == "landscape"
+    vid_w = 1920 if is_landscape else W
+    vid_h = 1080 if is_landscape else H
+
     # Step 1: TTS
     jobs[job_id] = {"status": "running", "progress": 10, "message": "Generating narration...", "result": None}
     tts_dir = os.path.join(TTS_CACHE_DIR, req.story_id, req.voice)
@@ -351,15 +415,19 @@ def _generate_reel_impl(req: ReelRequest, job_id: str):
 
     if req.include_intro:
         intro_vid = os.path.join(REELS_DIR, f"intro_{req.story_id}.mp4")
-        create_intro_video(story["title"], intro_vid)
+        create_intro_video(story["title"], intro_vid, orientation)
         intro_dur = get_dur(intro_vid) if intro_vid and os.path.exists(intro_vid) else 0
 
     if req.include_outro:
-        outro_template = os.path.join(ASSETS_DIR, "TheStoryMama Outro.mp4")
-        if os.path.exists(outro_template):
+        if is_landscape:
+            outro_template = os.path.join(ASSETS_DIR, "Landscape Outro.mp4")
+            outro_vid = os.path.join(REELS_DIR, "outro_landscape.mp4")
+        else:
+            outro_template = os.path.join(ASSETS_DIR, "TheStoryMama Outro.mp4")
             outro_vid = os.path.join(REELS_DIR, "outro_scaled.mp4")
+        if os.path.exists(outro_template):
             subprocess.run(["ffmpeg", "-y", "-i", outro_template,
-                            "-vf", f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps=30",
+                            "-vf", f"scale={vid_w}:{vid_h}:force_original_aspect_ratio=increase,crop={vid_w}:{vid_h},fps=30",
                             "-c:v", "libx264", "-preset", "fast", "-crf", "23", "-pix_fmt", "yuv420p",
                             "-an", outro_vid], capture_output=True)
             outro_dur = get_dur(outro_vid)
@@ -386,7 +454,7 @@ def _generate_reel_impl(req: ReelRequest, job_id: str):
 
     # Scale all inputs
     for i in range(total_segs):
-        vf.append(f"[{i}:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,fps=30[v{i}]")
+        vf.append(f"[{i}:v]scale={vid_w}:{vid_h}:force_original_aspect_ratio=increase,crop={vid_w}:{vid_h},setsar=1,fps=30[v{i}]")
 
     # Xfade chain
     offset = all_segments[0]["dur"] - tr
@@ -407,7 +475,8 @@ def _generate_reel_impl(req: ReelRequest, job_id: str):
     # Cache video track — same for all BGM/volume combos of this story+voice+intro+outro combo
     intro_flag = "i" if (intro_vid and os.path.exists(intro_vid)) else "n"
     outro_flag = "o" if (outro_vid and os.path.exists(outro_vid)) else "n"
-    video_cache_key = f"{req.story_id}_{req.voice}_{intro_flag}{outro_flag}"
+    orient_flag = "L" if is_landscape else "P"
+    video_cache_key = f"{req.story_id}_{req.voice}_{intro_flag}{outro_flag}_{orient_flag}"
     jobs[job_id] = {"status": "running", "progress": 40, "message": "Building video track...", "result": None}
     video_only = os.path.join(REELS_DIR, f"vcache_{video_cache_key}.mp4")
 
