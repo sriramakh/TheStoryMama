@@ -1799,6 +1799,50 @@ class BuildApproveRequest(BaseModel):
 build_jobs: dict[str, dict] = {}
 
 
+class BuildWithStoryRequest(BaseModel):
+    style: str = "animation_movie"
+    layout: str = "portrait"
+    num_scenes: int = 12
+    story_model: str = "grok-4-1-fast"
+    story: dict  # The reviewed story data
+
+
+@app.post("/api/build/single-with-story")
+def start_single_build_with_story(req: BuildWithStoryRequest):
+    """Start image generation with a pre-reviewed story (from scene review)."""
+    job_id = uuid.uuid4().hex[:10]
+    # Convert to BuildSingleRequest for the pipeline
+    build_req = BuildSingleRequest(
+        mode="manual", style=req.style, layout=req.layout,
+        num_scenes=req.num_scenes, story_model=req.story_model,
+    )
+    build_jobs[job_id] = {
+        "type": "single",
+        "status": "running",
+        "phase": "story",
+        "progress": 0,
+        "message": "Starting...",
+        "request": build_req.model_dump(),
+        "story": req.story,  # Pre-set the reviewed story
+        "image_paths": [],
+        "qc_scores": [],
+        "result": None,
+    }
+
+    def run():
+        try:
+            _build_single(build_req, job_id)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            build_jobs[job_id]["status"] = "failed"
+            build_jobs[job_id]["message"] = str(e)
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    return {"job_id": job_id}
+
+
 @app.post("/api/build/single")
 def start_single_build(req: BuildSingleRequest):
     """Start a single story build."""
@@ -2016,14 +2060,15 @@ def _build_single(req: BuildSingleRequest, job_id: str):
     style = Config.ANIMATION_STYLES.get(style_key, Config.ANIMATION_STYLES["animation_movie"])
     image_size = _get_image_size(req.layout)
 
-    # Phase 1: Generate story
+    # Phase 1: Generate or use pre-reviewed story
     build_jobs[job_id].update({"phase": "story", "progress": 5, "message": "Writing story..."})
 
-    if req.mode == "manual" and req.scenes:
-        # Manual: use provided scenes (already reviewed)
-        story = build_jobs[job_id].get("story")
-        if not story:
-            raise Exception("No story found for manual build")
+    # Check if story was pre-set (from scene review approval)
+    story = build_jobs[job_id].get("story")
+    if story:
+        # Story already reviewed and approved — use it directly
+        if not story.get("animation_style"):
+            story["animation_style"] = style_key
     else:
         # Auto: generate story with duplicate avoidance
         generator = StoryGenerator(model=req.story_model)
@@ -2707,24 +2752,25 @@ function regenerateStory() {
 }
 
 function approveScenes() {
-  // Start build with the reviewed story
+  // Start build with the reviewed story — send the full story so images match
   document.getElementById('singleProgress').classList.remove('hidden');
   document.getElementById('sceneReview').classList.add('hidden');
   updateSingleProgress(5, 'Starting image generation...');
 
-  fetch('/api/build/single', {
+  // Send reviewed story to a new endpoint that stores it, then starts the build
+  fetch('/api/build/single-with-story', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({mode: 'manual', style: selectedStyle, layout: selectedLayout, num_scenes: currentStory.scenes.length, story_model: document.getElementById('storyModel').value}),
+    body: JSON.stringify({
+      style: selectedStyle,
+      layout: selectedLayout,
+      num_scenes: currentStory.scenes.length,
+      story_model: document.getElementById('storyModel').value,
+      story: currentStory,
+    }),
   }).then(r => r.json()).then(data => {
-    // Store the story in the job
     currentJobId = data.job_id;
-    // Update the job's story server-side
-    fetch('/api/build/job/' + data.job_id).then(r => r.json()).then(job => {
-      // The auto pipeline will regenerate — for manual, we'd need to set story first
-      // For now, treat as auto with the same description
-      pollBuildJob(data.job_id, 'single');
-    });
+    pollBuildJob(data.job_id, 'single');
   });
 }
 
