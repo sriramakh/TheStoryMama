@@ -97,7 +97,7 @@ class ImageGenerator:
             relevant_chars = story["characters"]
 
         character_block = "\n".join(
-            f"- {c['name']}: {c['description']}"
+            f"- {c['name']} [{self._gender_prefix(c)} {c.get('type', '')}]: {c['description']}"
             for c in relevant_chars
         )
 
@@ -163,16 +163,21 @@ RULES:
         analysis_prompt = f"""You are a visual consistency expert for a children's picture book.
 
 The characters in this story are: {char_names}
-Hints: {char_hints}
+Character details (TRUST THESE for gender/species — the image may have errors): {char_hints}
 
 Analyze this illustration and for EACH character write ONE dense line:
-{'{'}Name{'}'}: {'{'}species/type{'}'}, {'{'}exact body/fur/skin/feather color{'}'}, {'{'}eye color{'}'}, {'{'}exact clothing colors & patterns{'}'}, {'{'}accessories{'}'}, {'{'}size/build relative to others{'}'}
+{'{'}Name{'}'}: {'{'}GENDER (boy/girl/male/female) from the hints above — NOT from the image{'}'}, {'{'}species/type{'}'}, {'{'}exact body/fur/skin/feather color{'}'}, {'{'}eye color{'}'}, {'{'}exact clothing colors & patterns{'}'}, {'{'}accessories{'}'}, {'{'}size/build relative to others{'}'}
+
+CRITICAL: Use the CHARACTER DETAILS above as the source of truth for gender and species.
+If the hints say "boy" or use a male name (Ethan, Max, Oliver), describe as MALE/BOY.
+If the hints say "girl" or use a female name (Lily, Emma), describe as FEMALE/GIRL.
+Family members (parent-child, grandparent-grandchild) must have consistent skin tones.
 
 Then write ONE line describing the art style (lighting, color palette, rendering).
 
 Be OBSESSIVELY precise about colors — e.g. "cerulean blue sweater with 3 golden star patches" NOT "blue sweater". Mention EVERY visible detail: spots, stripes, buttons, buckles, bows, whiskers, tail shape, ear shape, hat style.
 
-Total response MUST be under 500 characters. No headers, no bullet points, no extra words."""
+Total response MUST be under 600 characters. No headers, no bullet points, no extra words."""
 
         try:
             response = self.openai_client.chat.completions.create(
@@ -195,10 +200,10 @@ Total response MUST be under 500 characters. No headers, no bullet points, no ex
                 max_tokens=350,
             )
             sheet = response.choices[0].message.content.strip()
-            # Safety: hard-cap at 500 chars
-            if len(sheet) > 500:
-                cut = sheet[:500].rfind(".")
-                sheet = sheet[: cut + 1] if cut > 300 else sheet[:500]
+            # Safety: hard-cap at 600 chars
+            if len(sheet) > 600:
+                cut = sheet[:600].rfind(".")
+                sheet = sheet[: cut + 1] if cut > 400 else sheet[:600]
             return sheet
         except Exception as e:
             print(f"   Reference image analysis failed ({e}), using story descriptions")
@@ -227,7 +232,7 @@ Total response MUST be under 500 characters. No headers, no bullet points, no ex
             # ── Scene 1: establish the visual baseline ──
             # Include ALL characters with full descriptions
             character_block = "\n".join(
-                f"- {c['name']} ({c['type']}): {c['description']}"
+                f"- {c['name']} [{self._gender_prefix(c)} {c['type']}]: {c['description']}"
                 for c in all_chars
             )
 
@@ -484,6 +489,31 @@ SCENE {scene['scene_number']}/{len(scenes)}: {scene['image_description']}{scene_
     #  Phase 1d: Generate a single scene image with GPT-image-1
     # ------------------------------------------------------------------ #
 
+    @staticmethod
+    def _gender_prefix(char: dict) -> str:
+        """Extract explicit gender prefix from character type/description for image prompts."""
+        ctype = char.get("type", "").lower()
+        desc = char.get("description", "").lower()
+        name = char.get("name", "").lower()
+        # Check type field
+        if any(w in ctype for w in ["boy", "male", "man", "father", "grandfather", "brother", "son"]):
+            return "MALE"
+        if any(w in ctype for w in ["girl", "female", "woman", "mother", "grandmother", "sister", "daughter"]):
+            return "FEMALE"
+        # Check description
+        if any(w in desc for w in ["boy", " he ", "his ", "male"]):
+            return "MALE"
+        if any(w in desc for w in ["girl", " she ", "her ", "female"]):
+            return "FEMALE"
+        # Common gendered names
+        boy_names = {"ethan", "max", "oliver", "james", "noah", "liam", "finn", "leo", "jack", "sam", "ben", "tom", "lucas", "henry", "alex"}
+        girl_names = {"lily", "emma", "sophia", "mia", "ella", "chloe", "aria", "luna", "zoe", "ruby", "ivy", "lila", "maya", "nora", "eva"}
+        if name in boy_names:
+            return "MALE"
+        if name in girl_names:
+            return "FEMALE"
+        return ""
+
     def _build_gpt_image_prompt(self, story: dict, scene: dict, scene_index: int) -> str:
         """
         Build a detailed prompt for gpt-image-1-mini. No character limit,
@@ -494,7 +524,7 @@ SCENE {scene['scene_number']}/{len(scenes)}: {scene['image_description']}{scene_
         all_chars = story["characters"]
 
         character_block = "\n".join(
-            f"- {c['name']} ({c['type']}): {c['description']}"
+            f"- {c['name']} [{self._gender_prefix(c)} {c['type']}]: {c['description']}"
             for c in all_chars
         )
 
@@ -567,7 +597,7 @@ IMPORTANT — CHARACTER VISUAL REFERENCE (how each character ACTUALLY looks — 
 """
             # Build a block describing only the characters present in this scene
             present_block = "\n".join(
-                f"- {c['name']} ({c['type']}): {c['description']}"
+                f"- {c['name']} [{self._gender_prefix(c)} {c['type']}]: {c['description']}"
                 for c in scene_chars
             )
 
