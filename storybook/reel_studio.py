@@ -452,9 +452,12 @@ def _generate_reel_impl(req: ReelRequest, job_id: str):
     total_segs = len(all_segments)
     vf = []
 
-    # Scale all inputs
+    # Scale all inputs — fit without cropping, pad with warm cream if aspect ratio differs
     for i in range(total_segs):
-        vf.append(f"[{i}:v]scale={vid_w}:{vid_h}:force_original_aspect_ratio=increase,crop={vid_w}:{vid_h},setsar=1,fps=30[v{i}]")
+        if is_landscape:
+            vf.append(f"[{i}:v]scale={vid_w}:{vid_h}:force_original_aspect_ratio=decrease,pad={vid_w}:{vid_h}:(ow-iw)/2:(oh-ih)/2:color=#F5EDE0,setsar=1,fps=30[v{i}]")
+        else:
+            vf.append(f"[{i}:v]scale={vid_w}:{vid_h}:force_original_aspect_ratio=increase,crop={vid_w}:{vid_h},setsar=1,fps=30[v{i}]")
 
     # Xfade chain
     offset = all_segments[0]["dur"] - tr
