@@ -530,7 +530,16 @@ SCENE {scene['scene_number']}/{len(scenes)}: {scene['image_description']}{scene_
             if re.search(p, desc):
                 return "FEMALE"
 
-        # Expanded gendered name lists
+        # Name-based gender detection — only for human-like characters
+        animal_indicators = ["puppy", "dog", "cat", "kitten", "bunny", "rabbit", "bear", "fox",
+                             "owl", "bird", "fish", "turtle", "mouse", "squirrel", "deer", "frog",
+                             "duck", "hen", "rooster", "pig", "cow", "horse", "pony", "otter",
+                             "beaver", "hedgehog", "penguin", "parrot", "hamster", "chipmunk",
+                             "raccoon", "wolf", "lion", "tiger", "elephant", "monkey", "seal"]
+        is_animal = any(a in ctype for a in animal_indicators)
+        if is_animal:
+            return ""  # Don't assign human gender to animals
+
         boy_names = {
             "ethan", "max", "oliver", "james", "noah", "liam", "finn", "leo", "jack", "sam",
             "ben", "tom", "lucas", "henry", "alex", "aiden", "mason", "logan", "jacob", "ryan",
