@@ -139,6 +139,30 @@ CONTEXT-AWARE (when user provides a description):
 19. Characters MUST match the user's description exactly. If they say "father and daughter,"
     use humans. If they say "ocean adventure," use aquatic creatures. Respect intent precisely.
 
+CHARACTER CONTEXT AWARENESS — CRITICAL RULES:
+20. NAME-GENDER CONSISTENCY: Character names carry gender. "Ethan," "Max," "Oliver," "James"
+    are BOY names — NEVER create a girl with a boy's name or vice versa. "Lily," "Emma," "Sophia"
+    are GIRL names. If the user provides a name, use the correct gender for that name. If unsure,
+    treat the name as the most common gender association. This is NON-NEGOTIABLE.
+21. FAMILY APPEARANCE CONSISTENCY: Family members (parent-child, grandparent-grandchild, siblings)
+    MUST share consistent ethnicity and skin tone. A dark-skinned child MUST have dark-skinned
+    parents and grandparents. A fair-skinned grandmother MUST have a fair-skinned grandchild.
+    Mixed-race families are fine when EXPLICITLY described, but by default, family members look
+    like they are related. Hair color, eye color, and facial features should also show family
+    resemblance. This applies to ALL family relationships in the story.
+22. USER DESCRIPTION FAITHFULNESS: When the user describes a character as "boy," "he," "him,"
+    "son," "brother," "father," "grandfather" — the character MUST be male. When "girl," "she,"
+    "her," "daughter," "sister," "mother," "grandmother" — the character MUST be female. Never
+    swap genders. Never change species (if user says "puppy," it must be a puppy, not a cat).
+    Never change relationships (if user says "grandmother," she must be elderly, not young).
+23. INTERNAL CONSISTENCY: Within a single story, character appearances must remain IDENTICAL
+    across ALL scenes. If a character has "dark brown skin, curly black hair, and a red jacket"
+    in scene 1, they MUST have the exact same appearance in scenes 2-12. The character description
+    in the JSON is the single source of truth — every image_description must reference it faithfully.
+24. AGE-APPROPRIATE APPEARANCES: Toddlers look like toddlers (chubby, small). Grandparents look
+    elderly (gray/white hair, wrinkles, gentle posture). Parents look like adults. Do NOT make
+    a grandmother look like a young woman or a toddler look like a school-age child.
+
 You MUST respond ONLY with valid JSON in the exact format specified. No markdown, no extra text."""
 
 
@@ -479,11 +503,19 @@ class StoryGenerator:
         if description:
             parts.append(
                 f"The user wants a story about: {description}\n"
-                "Build the story around this idea. IMPORTANT: The characters MUST match the "
-                "user's description exactly. If the user mentions humans (father, daughter, boy, "
-                "girl, etc.), use HUMAN characters — do NOT replace them with animals. If the "
-                "user mentions specific animals or a specific environment (ocean, jungle, farm), "
-                "ALL characters must fit that context. Respect the user's intent precisely.\n"
+                "Build the story around this idea. CRITICAL RULES:\n"
+                "- Characters MUST match the user's description exactly. If they say 'boy' or use "
+                "a boy's name (Ethan, Max, Oliver, etc.), the character MUST be male. If they say "
+                "'girl' or use a girl's name (Lily, Emma, etc.), the character MUST be female.\n"
+                "- If the user mentions humans (father, daughter, boy, girl, etc.), use HUMAN "
+                "characters — do NOT replace them with animals.\n"
+                "- If the user mentions specific animals or a specific environment (ocean, jungle, "
+                "farm), ALL characters must fit that context.\n"
+                "- Family members MUST share consistent skin tone and ethnicity — a child and their "
+                "parent/grandparent should look related.\n"
+                "- Character species must be exact: if user says 'puppy,' use a puppy, not a cat.\n"
+                "- Respect the user's intent precisely — do NOT change names, genders, species, "
+                "or relationships from what the user described.\n"
             )
         parts.append(STORY_USER_PROMPT.format(
             num_scenes=num_scenes,
