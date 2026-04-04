@@ -284,6 +284,19 @@ def get_scene_image(story_id: str, scene_num: int):
     raise HTTPException(404, "Image not found")
 
 
+@app.get("/api/stories/{story_id}/image/{scene_num}/backup")
+def get_scene_image_backup(story_id: str, scene_num: int):
+    """Serve the backup (pre-correction) version of a scene image."""
+    staging_dir = os.path.join("reel_studio_cache", "staging")
+    for base_dir in [staging_dir, STORIES_DIR]:
+        for ext in ["_raw.png.bak", "_web.jpg.bak", ".jpg.bak"]:
+            path = os.path.join(base_dir, story_id, f"scene_{scene_num:02d}{ext}")
+            if os.path.exists(path):
+                return FileResponse(path)
+    # No backup — fall back to current image
+    return get_scene_image(story_id, scene_num)
+
+
 @app.get("/api/bgm")
 def list_bgm():
     """List available BGM tracks."""
@@ -1717,8 +1730,9 @@ function pollCorrectionJob(jobId) {
       document.getElementById('corrProgress').style.display = 'none';
       document.getElementById('fixBtn').disabled = false;
 
-      // Show before/after comparison
-      document.getElementById('beforeImg').src = beforeImageUrl;
+      // Show before/after comparison — before uses backup, after uses new image
+      const backupUrl = selectedScene.image_url.replace('/image/', '/image/') + '/backup?t=' + Date.now();
+      document.getElementById('beforeImg').src = '/api/stories/' + storyData.id + '/image/' + selectedScene.scene_number + '/backup?t=' + Date.now();
       document.getElementById('afterImg').src = data.result.new_image_url;
       document.getElementById('compareArea').style.display = 'flex';
       document.getElementById('approvalBtns').style.display = 'flex';
@@ -2929,8 +2943,8 @@ function pollFixJob(jobId) {
       document.getElementById('fixProgress').classList.add('hidden');
       document.getElementById('fixSubmitBtn').disabled = false;
 
-      // Show before/after comparison
-      document.getElementById('fixCompBefore').src = fixBeforeUrl;
+      // Show before/after comparison — before uses backup, after uses current (new) image
+      document.getElementById('fixCompBefore').src = '/api/stories/' + currentStoryId + '/image/' + fixingSceneNum + '/backup?t=' + Date.now();
       document.getElementById('fixCompAfter').src = '/api/stories/' + currentStoryId + '/image/' + fixingSceneNum + '?t=' + Date.now();
       document.getElementById('fixCompare').classList.remove('hidden');
       document.getElementById('fixApprovalBtns').classList.remove('hidden');
