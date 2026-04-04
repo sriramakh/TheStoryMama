@@ -454,8 +454,29 @@ def _generate_reel_impl(req: ReelRequest, job_id: str):
         inputs_v.extend(["-i", intro_vid])
         all_segments.append({"dur": intro_dur})
 
+    # For landscape: composite scene images onto intro background to fill 16:9
+    landscape_bg_path = os.path.join(ASSETS_DIR, "landscape_bg.png")
+    composited_imgs = []
+
     for sd in sdata:
-        inputs_v.extend(["-loop", "1", "-t", str(sd["dur"]), "-i", sd["img"]])
+        img_path = sd["img"]
+        if is_landscape and os.path.exists(landscape_bg_path):
+            # Composite scene image centered on intro background
+            try:
+                bg = Image.open(landscape_bg_path).convert("RGB").resize((1920, 1080))
+                scene_img = Image.open(img_path).convert("RGB")
+                ratio = min(1920 / scene_img.width, 1080 / scene_img.height)
+                new_w = int(scene_img.width * ratio)
+                new_h = int(scene_img.height * ratio)
+                scene_img = scene_img.resize((new_w, new_h), Image.LANCZOS)
+                bg.paste(scene_img, ((1920 - new_w) // 2, (1080 - new_h) // 2))
+                comp_path = os.path.join(REELS_DIR, f"comp_{os.path.basename(img_path)}.png")
+                bg.save(comp_path)
+                composited_imgs.append(comp_path)
+                img_path = comp_path
+            except Exception:
+                pass
+        inputs_v.extend(["-loop", "1", "-t", str(sd["dur"]), "-i", img_path])
         all_segments.append({"dur": sd["dur"]})
 
     if outro_vid and os.path.exists(outro_vid):
@@ -465,10 +486,11 @@ def _generate_reel_impl(req: ReelRequest, job_id: str):
     total_segs = len(all_segments)
     vf = []
 
-    # Scale all inputs — fit without cropping, pad with warm cream if aspect ratio differs
+    # Scale all inputs
     for i in range(total_segs):
         if is_landscape:
-            vf.append(f"[{i}:v]scale={vid_w}:{vid_h}:force_original_aspect_ratio=decrease,pad={vid_w}:{vid_h}:(ow-iw)/2:(oh-ih)/2:color=#F5EDE0,setsar=1,fps=30[v{i}]")
+            # Landscape scene images are pre-composited to 1920x1080 with intro background
+            vf.append(f"[{i}:v]scale={vid_w}:{vid_h},setsar=1,fps=30[v{i}]")
         else:
             vf.append(f"[{i}:v]scale={vid_w}:{vid_h}:force_original_aspect_ratio=increase,crop={vid_w}:{vid_h},setsar=1,fps=30[v{i}]")
 
@@ -506,7 +528,13 @@ def _generate_reel_impl(req: ReelRequest, job_id: str):
     else:
         jobs[job_id]["progress"] = 60
         jobs[job_id]["message"] = "Using cached video track"
-    # else: reuse cached video track
+
+    # Cleanup composited temp images
+    for cp in composited_imgs:
+        try:
+            os.remove(cp)
+        except OSError:
+            pass
 
     # BUILD AUDIO
     inputs_a = []
