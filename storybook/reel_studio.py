@@ -2125,6 +2125,10 @@ def _build_single(req: BuildSingleRequest, job_id: str):
         )
         story["animation_style"] = style_key
 
+    # Set orientation from layout
+    orientation = "landscape" if req.layout == "landscape" else "portrait"
+    story["orientation"] = orientation
+
     build_jobs[job_id]["story"] = story
     build_jobs[job_id].update({"progress": 15, "message": f"Story: {story['title']}"})
 
