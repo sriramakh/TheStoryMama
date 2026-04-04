@@ -116,50 +116,57 @@ SCENE RULES:
 12. ALL main characters appear in EVERY scene by default — they are on this adventure together.
     The ONLY exception is when the plot specifically requires a character to be absent (e.g., a
     missing friend who hasn't been found yet, someone hiding for a surprise, characters who split
-    up temporarily). In such cases, the image_description must clearly state which characters
-    are present and which are absent in that specific scene.
-13. Scene text should be SHORT — 2-3 sentences max, using simple words a 2-4 year old understands.
+    up temporarily). In such cases, the image_description must clearly state who IS and who is NOT
+    in the scene.
+13. image_description MUST ALWAYS mention EVERY character present in the scene BY THEIR EXACT NAME.
+    The image generator uses character names to decide who to draw. If you don't mention a character
+    by name in image_description, they will NOT appear in the image. Example:
+    GOOD: "Ethan and Max run through the garden. Ethan reaches for a red flower while Max sniffs a bush."
+    BAD: "The boy and his puppy run through the garden." (names missing — image generator can't identify characters)
+    ALSO: Do NOT introduce unnamed characters in image_description that aren't defined in the characters array.
+    Every person/animal in image_description must be a named character from the characters list.
+14. Scene text should be SHORT — 2-3 sentences max, using simple words a 2-4 year old understands.
     But make every word count. Great children's writing is simple AND evocative.
 
 WRITING QUALITY:
-14. Use rhythmic, read-aloud-friendly language. Short punchy sentences mixed with slightly
+15. Use rhythmic, read-aloud-friendly language. Short punchy sentences mixed with slightly
     longer flowing ones. Repetition and patterns that toddlers love.
-15. Appeal to ALL senses: colors, sounds, textures, smells, tastes. "The warm bread smelled
+16. Appeal to ALL senses: colors, sounds, textures, smells, tastes. "The warm bread smelled
     like sunshine" is better than "they found bread."
-16. Create moments of WONDER — things that make a child's eyes go wide. A rainbow waterfall,
+17. Create moments of WONDER — things that make a child's eyes go wide. A rainbow waterfall,
     a tree that grows candy, footprints that glow in the dark, a door hidden behind a curtain
     of flowers.
-17. A moral is OPTIONAL. If the story naturally teaches something, include it. If it's just a
+18. A moral is OPTIONAL. If the story naturally teaches something, include it. If it's just a
     fun adventure, set "moral" to null. NEVER force a lesson. When you do include one, make it
     FRESH — not "sharing is caring" or "be kind."
-18. Be ORIGINAL. Surprise us with unexpected characters, settings, and plot turns that still
+19. Be ORIGINAL. Surprise us with unexpected characters, settings, and plot turns that still
     feel cozy and age-appropriate.
 
 CONTEXT-AWARE (when user provides a description):
-19. Characters MUST match the user's description exactly. If they say "father and daughter,"
+20. Characters MUST match the user's description exactly. If they say "father and daughter,"
     use humans. If they say "ocean adventure," use aquatic creatures. Respect intent precisely.
 
 CHARACTER CONTEXT AWARENESS — CRITICAL RULES:
-20. NAME-GENDER CONSISTENCY: Character names carry gender. "Ethan," "Max," "Oliver," "James"
+21. NAME-GENDER CONSISTENCY: Character names carry gender. "Ethan," "Max," "Oliver," "James"
     are BOY names — NEVER create a girl with a boy's name or vice versa. "Lily," "Emma," "Sophia"
     are GIRL names. If the user provides a name, use the correct gender for that name. If unsure,
     treat the name as the most common gender association. This is NON-NEGOTIABLE.
-21. FAMILY APPEARANCE CONSISTENCY: Family members (parent-child, grandparent-grandchild, siblings)
+22. FAMILY APPEARANCE CONSISTENCY: Family members (parent-child, grandparent-grandchild, siblings)
     MUST share consistent ethnicity and skin tone. A dark-skinned child MUST have dark-skinned
     parents and grandparents. A fair-skinned grandmother MUST have a fair-skinned grandchild.
     Mixed-race families are fine when EXPLICITLY described, but by default, family members look
     like they are related. Hair color, eye color, and facial features should also show family
     resemblance. This applies to ALL family relationships in the story.
-22. USER DESCRIPTION FAITHFULNESS: When the user describes a character as "boy," "he," "him,"
+23. USER DESCRIPTION FAITHFULNESS: When the user describes a character as "boy," "he," "him,"
     "son," "brother," "father," "grandfather" — the character MUST be male. When "girl," "she,"
     "her," "daughter," "sister," "mother," "grandmother" — the character MUST be female. Never
     swap genders. Never change species (if user says "puppy," it must be a puppy, not a cat).
     Never change relationships (if user says "grandmother," she must be elderly, not young).
-23. INTERNAL CONSISTENCY: Within a single story, character appearances must remain IDENTICAL
+24. INTERNAL CONSISTENCY: Within a single story, character appearances must remain IDENTICAL
     across ALL scenes. If a character has "dark brown skin, curly black hair, and a red jacket"
     in scene 1, they MUST have the exact same appearance in scenes 2-12. The character description
     in the JSON is the single source of truth — every image_description must reference it faithfully.
-24. AGE-APPROPRIATE APPEARANCES: Toddlers look like toddlers (chubby, small). Grandparents look
+25. AGE-APPROPRIATE APPEARANCES: Toddlers look like toddlers (chubby, small). Grandparents look
     elderly (gray/white hair, wrinkles, gentle posture). Parents look like adults. Do NOT make
     a grandmother look like a young woman or a toddler look like a school-age child.
 
@@ -612,7 +619,8 @@ class StoryGenerator:
         return story_data
 
     def _validate_story(self, story: dict, expected_scenes: int):
-        """Validate that the story has all required fields."""
+        """Validate that the story has all required fields and character references."""
+        import re as _re
         required_keys = ["title", "characters", "setting", "art_style", "scenes"]
         for key in required_keys:
             if key not in story:
@@ -624,11 +632,21 @@ class StoryGenerator:
         if not story["scenes"]:
             raise ValueError("Story must have at least one scene")
 
+        char_names = [c["name"] for c in story["characters"]]
+
         # Validate each scene
         for i, scene in enumerate(story["scenes"]):
             for field in ["scene_number", "text", "image_description", "background"]:
                 if field not in scene:
                     raise ValueError(f"Scene {i+1} is missing field: '{field}'")
+
+            # Fix: ensure image_description mentions at least one character by name
+            img_desc = scene.get("image_description", "")
+            mentioned = [n for n in char_names if _re.search(r'\b' + _re.escape(n) + r'\b', img_desc, _re.IGNORECASE)]
+            if not mentioned and char_names:
+                # Auto-fix: prepend character names to image_description
+                char_list = ", ".join(char_names)
+                scene["image_description"] = f"{char_list} are in this scene. " + img_desc
 
     def regenerate_scenes(
         self,

@@ -94,12 +94,25 @@ Pauses: Longer, contemplative pauses between sentences.""",
 
 
 def get_font(size):
-    for p in ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-              "/System/Library/Fonts/Supplemental/Georgia Bold.ttf",
+    for p in ["/System/Library/Fonts/Supplemental/Georgia Bold.ttf",
+              "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf",
+              "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
               "/System/Library/Fonts/Supplemental/Arial Rounded Bold.ttf"]:
         if os.path.exists(p):
             return ImageFont.truetype(p, size)
     return ImageFont.load_default()
+
+
+def get_serif_font(size):
+    """Get a serif font for elegant title text (landscape intros)."""
+    for p in ["/System/Library/Fonts/Palatino.ttc",
+              "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf",
+              "/System/Library/Fonts/Supplemental/Georgia Bold.ttf"]:
+        if os.path.exists(p):
+            if p.endswith(".ttc"):
+                return ImageFont.truetype(p, size, index=1)  # Bold variant
+            return ImageFont.truetype(p, size)
+    return get_font(size)
 
 
 def get_dur(path):
@@ -166,12 +179,8 @@ def create_intro_video(title, out_path, orientation="portrait"):
     fps = 32
 
     if orientation == "landscape":
-        # Landscape: Palatino Bold 105px, title case, at y=560, fade at 6-8s
-        font_path = "/System/Library/Fonts/Palatino.ttc"
-        if os.path.exists(font_path):
-            font = ImageFont.truetype(font_path, 105, index=1)  # Bold
-        else:
-            font = get_font(105)
+        # Landscape: serif bold 105px, title case, at y=560, fade at 6-8s
+        font = get_serif_font(105)
         display_title = title.title()
         lines = textwrap.wrap(display_title, width=30)
 
@@ -495,18 +504,22 @@ def _generate_reel_impl(req: ReelRequest, job_id: str):
             vf.append(f"[{i}:v]scale={vid_w}:{vid_h}:force_original_aspect_ratio=increase,crop={vid_w}:{vid_h},setsar=1,fps=30[v{i}]")
 
     # Xfade chain
-    offset = all_segments[0]["dur"] - tr
-    vf.append(f"[v0][v1]xfade=transition=slideleft:duration={tr}:offset={offset:.3f}[xf1]")
-    cum = offset + all_segments[1]["dur"] - tr
+    if total_segs == 1:
+        # Single segment — no xfade needed
+        vf.append(f"[v0]copy[vout]")
+    elif total_segs == 2:
+        offset = all_segments[0]["dur"] - tr
+        vf.append(f"[v0][v1]xfade=transition=slideleft:duration={tr}:offset={offset:.3f}[vout]")
+    else:
+        offset = all_segments[0]["dur"] - tr
+        vf.append(f"[v0][v1]xfade=transition=slideleft:duration={tr}:offset={offset:.3f}[xf1]")
+        cum = offset + all_segments[1]["dur"] - tr
 
-    for i in range(2, total_segs):
-        prev = f"xf{i-1}"
-        curr = f"xf{i}" if i < total_segs - 1 else "vout"
-        vf.append(f"[{prev}][v{i}]xfade=transition=slideleft:duration={tr}:offset={cum:.3f}[{curr}]")
-        cum += all_segments[i]["dur"] - tr
-
-    if total_segs == 2:
-        vf[-1] = vf[-1].replace("[xf1]", "[vout]")
+        for i in range(2, total_segs):
+            prev = f"xf{i-1}"
+            curr = f"xf{i}" if i < total_segs - 1 else "vout"
+            vf.append(f"[{prev}][v{i}]xfade=transition=slideleft:duration={tr}:offset={cum:.3f}[{curr}]")
+            cum += all_segments[i]["dur"] - tr
 
     # Total video = sum of all durations minus overlaps from xfade transitions
     total_vid = sum(s["dur"] for s in all_segments) - (total_segs - 1) * tr
@@ -515,7 +528,8 @@ def _generate_reel_impl(req: ReelRequest, job_id: str):
     intro_flag = "i" if (intro_vid and os.path.exists(intro_vid)) else "n"
     outro_flag = "o" if (outro_vid and os.path.exists(outro_vid)) else "n"
     orient_flag = "L" if is_landscape else "P"
-    video_cache_key = f"{req.story_id}_{req.voice}_{intro_flag}{outro_flag}_{orient_flag}"
+    tempo_key = str(req.tts_tempo).replace(".", "")
+    video_cache_key = f"{req.story_id}_{req.voice}_{intro_flag}{outro_flag}_{orient_flag}_t{tempo_key}"
     jobs[job_id] = {"status": "running", "progress": 40, "message": "Building video track...", "result": None}
     video_only = os.path.join(REELS_DIR, f"vcache_{video_cache_key}.mp4")
 
@@ -833,14 +847,18 @@ def _correct_scene_impl(req: CorrectionRequest, job_id: str):
 
     char_block = "\n".join(f"- {c['name']} ({c['type']}): {c['description']}" for c in story["characters"])
 
-    # Get visual reference from scene before (if exists)
+    # Get visual reference from scene before (if exists) — check staging first, then published
     visual_ref = ""
     ref_scene_num = req.scene_number - 1 if req.scene_number > 1 else req.scene_number + 1
     ref_img_path = None
-    for ext in ["_web.jpg", "_raw.png", ".jpg"]:
-        p = os.path.join(STORIES_DIR, req.story_id, f"scene_{ref_scene_num:02d}{ext}")
-        if os.path.exists(p):
-            ref_img_path = p
+    staging_dir = os.path.join("reel_studio_cache", "staging")
+    for base_dir in [staging_dir, STORIES_DIR]:
+        for ext in ["_web.jpg", "_raw.png", ".jpg"]:
+            p = os.path.join(base_dir, req.story_id, f"scene_{ref_scene_num:02d}{ext}")
+            if os.path.exists(p):
+                ref_img_path = p
+                break
+        if ref_img_path:
             break
 
     if ref_img_path:

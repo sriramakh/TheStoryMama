@@ -10,6 +10,7 @@ Pipeline:
 import os
 import io
 import json
+import re
 import time
 import base64
 import requests
@@ -88,10 +89,10 @@ class ImageGenerator:
 
     def _build_image_prompt(self, story: dict, scene: dict, scene_index: int) -> str:
         """Build a focused prompt for image generation."""
-        scene_desc = scene["image_description"].lower()
+        scene_desc = scene["image_description"]
         relevant_chars = [
             c for c in story["characters"]
-            if c["name"].lower() in scene_desc
+            if self._char_name_in_text(c["name"], scene_desc)
         ]
         if not relevant_chars:
             relevant_chars = story["characters"]
@@ -490,24 +491,62 @@ SCENE {scene['scene_number']}/{len(scenes)}: {scene['image_description']}{scene_
     # ------------------------------------------------------------------ #
 
     @staticmethod
+    def _char_name_in_text(name: str, text: str) -> bool:
+        """Check if a character name appears in text using word boundary matching.
+        Prevents 'Max' from matching 'maximum' or 'Sam' from matching 'same'."""
+        pattern = r'\b' + re.escape(name.lower()) + r'\b'
+        return bool(re.search(pattern, text.lower()))
+
+    @staticmethod
     def _gender_prefix(char: dict) -> str:
         """Extract explicit gender prefix from character type/description for image prompts."""
         ctype = char.get("type", "").lower()
         desc = char.get("description", "").lower()
         name = char.get("name", "").lower()
-        # Check type field
-        if any(w in ctype for w in ["boy", "male", "man", "father", "grandfather", "brother", "son"]):
-            return "MALE"
-        if any(w in ctype for w in ["girl", "female", "woman", "mother", "grandmother", "sister", "daughter"]):
-            return "FEMALE"
-        # Check description
-        if any(w in desc for w in ["boy", " he ", "his ", "male"]):
-            return "MALE"
-        if any(w in desc for w in ["girl", " she ", "her ", "female"]):
-            return "FEMALE"
-        # Common gendered names
-        boy_names = {"ethan", "max", "oliver", "james", "noah", "liam", "finn", "leo", "jack", "sam", "ben", "tom", "lucas", "henry", "alex"}
-        girl_names = {"lily", "emma", "sophia", "mia", "ella", "chloe", "aria", "luna", "zoe", "ruby", "ivy", "lila", "maya", "nora", "eva"}
+
+        # Male indicators in type field (word boundary matching)
+        male_type_words = ["boy", "male", "man", "father", "dad", "grandfather", "grandpa",
+                           "brother", "son", "uncle", "prince", "king", "husband", "toddler boy"]
+        female_type_words = ["girl", "female", "woman", "mother", "mom", "grandmother", "grandma",
+                             "sister", "daughter", "aunt", "princess", "queen", "wife", "toddler girl"]
+
+        for w in male_type_words:
+            if w in ctype:
+                return "MALE"
+        for w in female_type_words:
+            if w in ctype:
+                return "FEMALE"
+
+        # Check description for pronoun/gender cues
+        male_desc_patterns = [r'\bboy\b', r'\b he \b', r'\bhis \b', r'\bmale\b', r'\bson\b',
+                              r'\bfather\b', r'\bdad\b', r'\bbrother\b', r'\bgrandfather\b', r'\bgrandpa\b']
+        female_desc_patterns = [r'\bgirl\b', r'\bshe \b', r'\bher \b', r'\bfemale\b', r'\bdaughter\b',
+                                r'\bmother\b', r'\bmom\b', r'\bsister\b', r'\bgrandmother\b', r'\bgrandma\b']
+
+        for p in male_desc_patterns:
+            if re.search(p, desc):
+                return "MALE"
+        for p in female_desc_patterns:
+            if re.search(p, desc):
+                return "FEMALE"
+
+        # Expanded gendered name lists
+        boy_names = {
+            "ethan", "max", "oliver", "james", "noah", "liam", "finn", "leo", "jack", "sam",
+            "ben", "tom", "lucas", "henry", "alex", "aiden", "mason", "logan", "jacob", "ryan",
+            "daniel", "david", "eli", "owen", "caleb", "nathan", "dylan", "connor", "tyler",
+            "charlie", "oscar", "felix", "theo", "archie", "teddy", "alfie", "jasper", "ravi",
+            "arjun", "kai", "mateo", "miguel", "omar", "yusuf", "adam", "isaac", "peter",
+            "luke", "mark", "paul", "sean", "kevin", "josh", "ian", "cole", "blake", "chase",
+        }
+        girl_names = {
+            "lily", "emma", "sophia", "mia", "ella", "chloe", "aria", "luna", "zoe", "ruby",
+            "ivy", "lila", "maya", "nora", "eva", "grace", "abby", "bella", "daisy", "rosie",
+            "poppy", "willow", "hazel", "violet", "iris", "flora", "stella", "clara", "alice",
+            "hannah", "emily", "sarah", "anna", "priya", "aanya", "mei", "sakura", "yuki",
+            "olivia", "isabella", "amelia", "charlotte", "harper", "evelyn", "layla", "riley",
+            "scarlett", "penelope", "ellie", "lucy", "leah", "quinn", "sage", "fern", "wren",
+        }
         if name in boy_names:
             return "MALE"
         if name in girl_names:
@@ -539,9 +578,7 @@ SCENE {scene['scene_number']}/{len(scenes)}: {scene['image_description']}{scene_
         # Determine which characters appear in this scene.
         # Only include characters who are EXPLICITLY named in the image_description.
         # For scene 1: include all characters (establishment shot).
-        image_desc_lower = scene.get("image_description", "").lower()
-        scene_text_lower = scene.get("text", "").lower()
-        combined_lower = image_desc_lower + " " + scene_text_lower
+        combined_text = scene.get("image_description", "") + " " + scene.get("text", "")
 
         scene_chars = []
         absent_chars = []
@@ -551,9 +588,8 @@ SCENE {scene['scene_number']}/{len(scenes)}: {scene['image_description']}{scene_
             scene_chars = list(all_chars)
         else:
             for c in all_chars:
-                name_lower = c["name"].lower()
-                # Character must be mentioned by name in image_description or scene text
-                if name_lower in combined_lower:
+                # Use word-boundary matching to avoid substring false positives
+                if self._char_name_in_text(c["name"], combined_text):
                     scene_chars.append(c)
                 else:
                     absent_chars.append(c)
@@ -923,6 +959,13 @@ Respond ONLY with JSON: {{"confidence": 0.85, "reason": "short note"}}"""
         os.makedirs(output_dir, exist_ok=True)
         image_paths = []
         total = len(story["scenes"])
+
+        # Reset per-story state (critical for batch mode — prevent cross-story bleeding)
+        self._reference_image_b64 = None
+        self._reference_image_path = None
+        self._recent_scene_paths = []
+        self._character_visual_sheet = None
+        self._prior_scene_images = []
 
         # ── Phase 1: Generate all images with CogView-4 ──
         for i, scene in enumerate(story["scenes"]):
