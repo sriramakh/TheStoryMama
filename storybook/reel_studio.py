@@ -2493,6 +2493,7 @@ textarea { min-height: 120px; resize: vertical; }
   <!-- QC Review -->
   <div id="qcReview" class="hidden" style="margin-top:20px;">
     <h3 style="font-size:16px; color:#654321; margin-bottom:12px;">Quality Review — click any image to fix</h3>
+    <div id="qcCharRef" style="display:none; background:#FFF9EB; padding:10px 14px; border-radius:10px; margin-bottom:12px; font-size:13px; color:#654321;"></div>
     <div class="qc-grid" id="qcGrid"></div>
 
     <!-- Inline correction panel -->
@@ -2741,7 +2742,7 @@ function startSingleBuild() {
     document.getElementById('singleProgress').classList.add('hidden');
     document.getElementById('btnBuildSingle').disabled = false;
   }).catch(e => {
-    document.getElementById('singleStatus').innerHTML = '<div class="status error">Error: ' + e.message + '</div>';
+    document.getElementById('singleStatus').innerHTML = '<div class="status error" style="display:flex; align-items:center; gap:10px;"><span>Error: ' + e.message + '</span><button class="btn btn-secondary" onclick="startSingleBuild()" style="padding:6px 14px; font-size:12px;">Retry</button></div>';
     document.getElementById('btnBuildSingle').disabled = false;
     document.getElementById('singleProgress').classList.add('hidden');
   });
@@ -2752,8 +2753,11 @@ function showSceneReview(story) {
   const list = document.getElementById('sceneList');
   list.innerHTML = `
     <div style="background:#FFF9EB; border-radius:10px; padding:12px; margin-bottom:12px;">
-      <p style="font-size:16px; font-weight:700; color:#654321;">${story.title}</p>
-      <p style="font-size:12px; color:#8B7D6B; margin-top:4px;">Characters: ${story.characters.map(c => c.name + ' (' + c.type + ')').join(', ')}</p>
+      <div style="display:flex; justify-content:space-between; align-items:start;">
+        <p style="font-size:16px; font-weight:700; color:#654321;">${story.title}</p>
+        <span style="font-size:10px; padding:3px 8px; background:#E8D5F5; color:#5B4370; border-radius:8px; white-space:nowrap;">${document.getElementById('storyModel').value}</span>
+      </div>
+      <p style="font-size:12px; color:#8B7D6B; margin-top:4px;">Characters: ${story.characters.map(c => '<b>' + c.name + '</b> (' + c.type + ')').join(', ')}</p>
       ${story.moral ? '<p style="font-size:12px; color:#8B7D6B; margin-top:2px;">Moral: ' + story.moral + '</p>' : ''}
     </div>` +
     story.scenes.map(s => `
@@ -2909,6 +2913,17 @@ function showQCReview(jobData) {
   currentStoryId = jobData.result.staging_id || jobData.result.story_id;
   const scores = jobData.qc_scores || [];
   qcStoryScenes = jobData.story?.scenes || [];
+
+  // Show character reference above QC grid
+  const chars = jobData.story?.characters || [];
+  const charRef = document.getElementById('qcCharRef');
+  if (charRef && chars.length) {
+    charRef.innerHTML = '<strong>Characters:</strong> ' + chars.map(c =>
+      '<span style="display:inline-block; background:#FFF3E0; padding:2px 8px; border-radius:12px; margin:2px; font-size:12px;">' +
+      c.name + ' <span style="color:#8B7D6B;">(' + c.type + ')</span></span>'
+    ).join('');
+    charRef.style.display = 'block';
+  }
 
   const grid = document.getElementById('qcGrid');
   grid.innerHTML = qcStoryScenes.map((s, i) => {
