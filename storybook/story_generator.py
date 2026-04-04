@@ -1,13 +1,31 @@
 """
 Story Generator Module for StoryBook Generator.
-Uses OpenAI GPT-4o-mini (via OpenAI API) to generate structured children's stories.
+Supports GPT-4o-mini (OpenAI) and Grok 4-1 Fast (XAI) for structured children's stories.
 """
 
 import json
+import os
 import random
 import re
 from openai import OpenAI
 from config import Config
+
+
+# ── Model registry ─────────────────────────────────────────────────────────────
+STORY_MODELS = {
+    "grok-4-1-fast": {
+        "label": "Grok 4-1 Fast",
+        "api_key_env": "GROK_API_KEY",
+        "base_url": "https://api.x.ai/v1",
+        "model_id": "grok-4-1-fast",
+    },
+    "gpt-4o-mini": {
+        "label": "GPT-4o Mini",
+        "api_key_env": "OPENAI_API_KEY",
+        "base_url": None,  # default OpenAI
+        "model_id": "gpt-4o-mini",
+    },
+}
 
 
 # --------------------------------------------------------------------------- #
@@ -313,13 +331,76 @@ IMPORTANT:
 
 
 class StoryGenerator:
-    """Generates structured children's stories using OpenAI GPT-4o-mini."""
+    """Generates structured children's stories using GPT-4o-mini or Grok 4-1 Fast."""
 
-    def __init__(self):
-        self.client = OpenAI(
-            api_key=Config.OPENAI_API_KEY,
-        )
-        self.model = Config.STORY_MODEL
+    def __init__(self, model: str | None = None):
+        model_key = model or Config.STORY_MODEL
+        model_info = STORY_MODELS.get(model_key)
+
+        if model_info:
+            api_key = os.getenv(model_info["api_key_env"], "")
+            if model_info["base_url"]:
+                self.client = OpenAI(api_key=api_key, base_url=model_info["base_url"])
+            else:
+                self.client = OpenAI(api_key=api_key)
+            self.model = model_info["model_id"]
+        else:
+            # Fallback to OpenAI with whatever model string was given
+            self.client = OpenAI(api_key=Config.OPENAI_API_KEY)
+            self.model = model_key
+
+    @staticmethod
+    def get_existing_titles() -> set[str]:
+        """Scan existing stories and return a set of lowercase titles."""
+        titles = set()
+        stories_dir = Config.OUTPUT_DIR
+        if not os.path.exists(stories_dir):
+            return titles
+        for folder in os.listdir(stories_dir):
+            json_path = os.path.join(stories_dir, folder, "story_data.json")
+            if os.path.exists(json_path):
+                try:
+                    with open(json_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    title = data.get("title", "").strip().lower()
+                    if title:
+                        titles.add(title)
+                except (json.JSONDecodeError, IOError):
+                    pass
+        # Also check staging directory
+        staging_dir = os.path.join("reel_studio_cache", "staging")
+        if os.path.exists(staging_dir):
+            for folder in os.listdir(staging_dir):
+                json_path = os.path.join(staging_dir, folder, "story_data.json")
+                if os.path.exists(json_path):
+                    try:
+                        with open(json_path, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                        title = data.get("title", "").strip().lower()
+                        if title:
+                            titles.add(title)
+                    except (json.JSONDecodeError, IOError):
+                        pass
+        return titles
+
+    @staticmethod
+    def get_existing_plots() -> list[str]:
+        """Scan existing stories and return a list of plot summaries (title + moral + setting)."""
+        plots = []
+        stories_dir = Config.OUTPUT_DIR
+        if not os.path.exists(stories_dir):
+            return plots
+        for folder in os.listdir(stories_dir):
+            json_path = os.path.join(stories_dir, folder, "story_data.json")
+            if os.path.exists(json_path):
+                try:
+                    with open(json_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    summary = f"{data.get('title', '')} — {data.get('moral', '')} ({data.get('setting', '')})"
+                    plots.append(summary)
+                except (json.JSONDecodeError, IOError):
+                    pass
+        return plots
 
     @staticmethod
     def _extract_json(text: str) -> dict:
@@ -347,6 +428,8 @@ class StoryGenerator:
         description: str | None = None,
         art_style_hint: str | None = None,
         character_names_prompt: str | None = None,
+        existing_titles: set[str] | None = None,
+        existing_plots: list[str] | None = None,
     ) -> dict:
         """
         Generate a structured children's story.
@@ -356,6 +439,8 @@ class StoryGenerator:
             description: Optional user-provided story brief
             art_style_hint: Optional art-style direction for the LLM
             character_names_prompt: Optional instruction to reuse character names
+            existing_titles: Set of existing title strings (lowercase) to avoid duplicates
+            existing_plots: List of existing plot summaries to avoid similar stories
 
         Returns:
             dict: Structured story data with title, characters, scenes, etc.
@@ -366,6 +451,31 @@ class StoryGenerator:
 
         # Build the user prompt with optional sections
         parts = []
+
+        # Inject duplicate avoidance
+        if existing_titles or existing_plots:
+            dedup_parts = []
+            if existing_titles:
+                # Show a sample of recent titles (up to 50 to avoid token bloat)
+                sample = list(existing_titles)
+                if len(sample) > 50:
+                    sample = random.sample(sample, 50)
+                title_list = "\n".join(f"  - {t}" for t in sorted(sample))
+                dedup_parts.append(
+                    f"EXISTING TITLES (DO NOT reuse or closely copy any of these):\n{title_list}"
+                )
+            if existing_plots:
+                # Show a sample of recent plots (up to 30)
+                sample = existing_plots
+                if len(sample) > 30:
+                    sample = random.sample(sample, 30)
+                plot_list = "\n".join(f"  - {p}" for p in sample)
+                dedup_parts.append(
+                    f"EXISTING PLOTS (create something DIFFERENT from all of these — "
+                    f"different characters, different setting, different conflict):\n{plot_list}"
+                )
+            parts.append("\n".join(dedup_parts))
+
         if description:
             parts.append(
                 f"The user wants a story about: {description}\n"

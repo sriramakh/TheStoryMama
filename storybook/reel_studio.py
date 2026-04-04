@@ -1768,6 +1768,7 @@ class BuildSingleRequest(BaseModel):
     mode: str = "auto"  # "auto" or "manual"
     layout: str = "portrait"  # "portrait" or "landscape"
     style: str = "animation_movie"
+    story_model: str = "grok-4-1-fast"  # "grok-4-1-fast" or "gpt-4o-mini"
     description: str | None = None
     num_scenes: int = 12
     scenes: list[dict] | None = None  # For manual: [{scene_number, text, image_description, background}]
@@ -1777,6 +1778,7 @@ class BuildBatchRequest(BaseModel):
     count: int = 5
     layout: str = "portrait"
     style: str = "animation_movie"
+    story_model: str = "grok-4-1-fast"
 
 
 class SceneEditRequest(BaseModel):
@@ -1872,14 +1874,24 @@ def generate_story_text(req: BuildSingleRequest):
     from config import Config
 
     style = Config.ANIMATION_STYLES.get(req.style, Config.ANIMATION_STYLES["animation_movie"])
-    generator = StoryGenerator()
+    generator = StoryGenerator(model=req.story_model)
+
+    # Load existing titles and plots for duplicate avoidance
+    existing_titles = StoryGenerator.get_existing_titles()
+    existing_plots = StoryGenerator.get_existing_plots()
 
     story = generator.generate_story(
         num_scenes=req.num_scenes,
         description=req.description,
         art_style_hint=style["story_art_style"],
+        existing_titles=existing_titles,
+        existing_plots=existing_plots,
     )
     story["animation_style"] = req.style
+
+    # Warn if title is still a duplicate (LLM may ignore instructions)
+    if story.get("title", "").strip().lower() in existing_titles:
+        story["_duplicate_warning"] = f"Title '{story['title']}' already exists — consider editing before approving."
 
     return {"story": story}
 
@@ -2010,12 +2022,16 @@ def _build_single(req: BuildSingleRequest, job_id: str):
         if not story:
             raise Exception("No story found for manual build")
     else:
-        # Auto: generate story
-        generator = StoryGenerator()
+        # Auto: generate story with duplicate avoidance
+        generator = StoryGenerator(model=req.story_model)
+        existing_titles = StoryGenerator.get_existing_titles()
+        existing_plots = StoryGenerator.get_existing_plots()
         story = generator.generate_story(
             num_scenes=req.num_scenes,
             description=req.description,
             art_style_hint=style["story_art_style"],
+            existing_titles=existing_titles,
+            existing_plots=existing_plots,
         )
         story["animation_style"] = style_key
 
@@ -2119,10 +2135,12 @@ def _build_batch(req: BuildBatchRequest, job_id: str):
     style = Config.ANIMATION_STYLES.get(style_key, Config.ANIMATION_STYLES["animation_movie"])
     image_size = _get_image_size(req.layout)
     orientation = "landscape" if req.layout == "landscape" else "portrait"
-    generator = StoryGenerator()
+    generator = StoryGenerator(model=req.story_model)
 
-    # Track generated titles to avoid repetition within batch
-    generated_titles = set()
+    # Track generated titles to avoid repetition within batch + existing
+    existing_titles = StoryGenerator.get_existing_titles()
+    existing_plots = StoryGenerator.get_existing_plots()
+    generated_titles = set(existing_titles)  # Include existing for dedup
     completed_stories = []
 
     for story_idx in range(req.count):
@@ -2139,6 +2157,8 @@ def _build_batch(req: BuildBatchRequest, job_id: str):
                 story = generator.generate_story(
                     num_scenes=12,
                     art_style_hint=style["story_art_style"],
+                    existing_titles=generated_titles,
+                    existing_plots=existing_plots,
                 )
                 if story["title"].lower() not in generated_titles:
                     break
@@ -2320,6 +2340,12 @@ textarea { min-height: 120px; resize: vertical; }
   <label>Art Style</label>
   <div class="style-grid" id="styleGrid"></div>
 
+  <label>Story Model</label>
+  <select id="storyModel">
+    <option value="grok-4-1-fast" selected>Grok 4-1 Fast (default)</option>
+    <option value="gpt-4o-mini">GPT-4o Mini</option>
+  </select>
+
   <label>Number of Scenes</label>
   <select id="sceneCount">
     <option value="12" selected>12 (recommended)</option>
@@ -2481,6 +2507,12 @@ textarea { min-height: 120px; resize: vertical; }
     <div class="layout-btn" id="batchLayoutLandscape" onclick="setBatchLayout('landscape')">Landscape (YouTube)</div>
   </div>
 
+  <label>Story Model</label>
+  <select id="batchStoryModel">
+    <option value="grok-4-1-fast" selected>Grok 4-1 Fast (default)</option>
+    <option value="gpt-4o-mini">GPT-4o Mini</option>
+  </select>
+
   <p style="font-size:13px; color:#8B7D6B; margin-top:12px;">Art style: Animation Movie (default). Stories auto-published to website.</p>
 
   <div style="margin-top:20px;">
@@ -2574,9 +2606,12 @@ function startSingleBuild() {
   fetch('/api/build/generate-story', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({description: desc || null, num_scenes: scenes, style: selectedStyle, layout: selectedLayout, mode: buildMode}),
+    body: JSON.stringify({description: desc || null, num_scenes: scenes, style: selectedStyle, layout: selectedLayout, mode: buildMode, story_model: document.getElementById('storyModel').value}),
   }).then(r => r.json()).then(data => {
     currentStory = data.story;
+    if (data.story._duplicate_warning) {
+      alert('Warning: ' + data.story._duplicate_warning);
+    }
     showSceneReview(data.story);
     document.getElementById('singleProgress').classList.add('hidden');
     document.getElementById('btnBuildSingle').disabled = false;
@@ -2654,9 +2689,12 @@ function regenerateStory() {
   fetch('/api/build/generate-story', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({description: desc || null, num_scenes: scenes, style: selectedStyle, layout: selectedLayout, mode: buildMode}),
+    body: JSON.stringify({description: desc || null, num_scenes: scenes, style: selectedStyle, layout: selectedLayout, mode: buildMode, story_model: document.getElementById('storyModel').value}),
   }).then(r => r.json()).then(data => {
     currentStory = data.story;
+    if (data.story._duplicate_warning) {
+      alert('Warning: ' + data.story._duplicate_warning);
+    }
     showSceneReview(data.story);
     document.getElementById('singleProgress').classList.add('hidden');
   }).catch(e => {
@@ -2674,7 +2712,7 @@ function approveScenes() {
   fetch('/api/build/single', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({mode: 'manual', style: selectedStyle, layout: selectedLayout, num_scenes: currentStory.scenes.length}),
+    body: JSON.stringify({mode: 'manual', style: selectedStyle, layout: selectedLayout, num_scenes: currentStory.scenes.length, story_model: document.getElementById('storyModel').value}),
   }).then(r => r.json()).then(data => {
     // Store the story in the job
     currentJobId = data.job_id;
@@ -3034,7 +3072,7 @@ function startBatchBuild() {
   fetch('/api/build/batch', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({count: count, layout: batchLayout, style: 'animation_movie'}),
+    body: JSON.stringify({count: count, layout: batchLayout, style: 'animation_movie', story_model: document.getElementById('batchStoryModel').value}),
   }).then(r => r.json()).then(data => {
     pollBuildJob(data.job_id, 'batch');
   });

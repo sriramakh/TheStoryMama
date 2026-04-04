@@ -27,8 +27,11 @@ class Config:
     MINIMAX_API_TOKEN = os.getenv("MINIMAX_API_TOKEN", "")
     MINIMAX_BASE_URL = os.getenv("MINIMAX_BASE_URL", "https://api.minimax.io/v1")
 
+    # Grok / XAI API
+    GROK_API_KEY = os.getenv("GROK_API_KEY", "")
+
     # Model settings
-    STORY_MODEL = os.getenv("STORY_MODEL", "gpt-4o-mini")
+    STORY_MODEL = os.getenv("STORY_MODEL", "grok-4-1-fast")
     IMAGE_MODEL = os.getenv("IMAGE_MODEL", "cogView-4-250304")
     IMAGE_SIZE = os.getenv("IMAGE_SIZE", "1024x1536")
     IMAGE_PROVIDER = os.getenv("IMAGE_PROVIDER", "gpt-image")  # "gpt-image", "gemini", "minimax", or "cogview"
