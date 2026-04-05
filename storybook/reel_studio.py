@@ -13,6 +13,7 @@ import shutil
 import uuid
 import time
 import threading
+import requests as http_requests
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -92,6 +93,9 @@ Pronunciation: Soft, rounded, unhurried.
 Pauses: Longer, contemplative pauses between sentences.""",
 }
 
+# Grok TTS voices (xAI)
+GROK_TTS_VOICES = {"eve", "ara"}
+
 
 def get_font(size):
     for p in ["/System/Library/Fonts/Supplemental/Georgia Bold.ttf",
@@ -122,16 +126,31 @@ def get_dur(path):
     return float(r.stdout.strip())
 
 
+def _add_speech_tags(text: str) -> str:
+    """Add Grok speech tags to children's story text for expressive narration."""
+    import re
+    # Add pauses after sentences
+    text = re.sub(r'([.!?])\s+', r'\1 [pause] ', text)
+    # Wrap exclamations in emphasis
+    text = re.sub(r'"([^"]{1,40}!)"', r'"<emphasis>\1</emphasis>"', text)
+    # Wrap whispered/quiet parts
+    text = re.sub(r'"([Ss]hh[^"]*)"', r'"<whisper>\1</whisper>"', text)
+    return text
+
+
 def generate_tts(story_id, voice):
-    """Generate TTS for all scenes of a story. Cached."""
+    """Generate TTS for all scenes of a story. Supports OpenAI (nova/sage) and Grok (eve/ara)."""
     cache_dir = os.path.join(TTS_CACHE_DIR, story_id, voice)
     os.makedirs(cache_dir, exist_ok=True)
 
-    story_path = os.path.join(STORIES_DIR, story_id, "story_data.json")
+    # Check staging first, then published
+    story_path = os.path.join("reel_studio_cache", "staging", story_id, "story_data.json")
+    if not os.path.exists(story_path):
+        story_path = os.path.join(STORIES_DIR, story_id, "story_data.json")
     with open(story_path) as f:
         story = json.load(f)
 
-    instructions = VOICE_INSTRUCTIONS[voice]
+    is_grok = voice.lower() in GROK_TTS_VOICES
     generated = 0
 
     for scene in story["scenes"]:
@@ -140,15 +159,38 @@ def generate_tts(story_id, voice):
         if os.path.exists(tts_path):
             continue
 
-        response = client.audio.speech.create(
-            model="tts-1-hd",
-            voice=voice,
-            input=scene["text"],
-            instructions=instructions,
-            response_format="mp3",
-        )
-        with open(tts_path, "wb") as f:
-            f.write(response.content)
+        if is_grok:
+            # Grok TTS via xAI API
+            tagged_text = _add_speech_tags(scene["text"])
+            resp = http_requests.post(
+                "https://api.x.ai/v1/tts",
+                headers={
+                    "Authorization": f"Bearer {Config.GROK_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "text": tagged_text,
+                    "voice_id": voice.capitalize(),
+                    "output_format": {"codec": "mp3", "sample_rate": 44100, "bit_rate": 128000},
+                    "language": "en",
+                },
+                timeout=30,
+            )
+            resp.raise_for_status()
+            with open(tts_path, "wb") as f:
+                f.write(resp.content)
+        else:
+            # OpenAI TTS
+            instructions = VOICE_INSTRUCTIONS[voice]
+            response = client.audio.speech.create(
+                model="tts-1-hd",
+                voice=voice,
+                input=scene["text"],
+                instructions=instructions,
+                response_format="mp3",
+            )
+            with open(tts_path, "wb") as f:
+                f.write(response.content)
         generated += 1
 
     return {"cached": len(story["scenes"]) - generated, "generated": generated}
@@ -340,10 +382,12 @@ def list_bgm():
 def api_generate_tts(story_id: str, voice: str = "both"):
     """Pre-generate TTS for a story."""
     results = {}
-    if voice in ("both", "sage"):
-        results["sage"] = generate_tts(story_id, "sage")
-    if voice in ("both", "nova"):
-        results["nova"] = generate_tts(story_id, "nova")
+    if voice == "both":
+        # Pre-generate OpenAI voices
+        for v in ["sage", "nova"]:
+            results[v] = generate_tts(story_id, v)
+    else:
+        results[voice] = generate_tts(story_id, voice)
     return results
 
 
@@ -1230,8 +1274,10 @@ h1 { color: #654321; margin-bottom: 8px; }
     <div class="controls">
       <label>TTS Voice</label>
       <select id="voice">
-        <option value="nova">Nova (gentle, maternal)</option>
-        <option value="sage">Sage (warm, playful)</option>
+        <option value="nova">Nova — OpenAI (gentle, maternal)</option>
+        <option value="sage">Sage — OpenAI (warm, playful)</option>
+        <option value="eve">Eve — Grok (energetic, upbeat)</option>
+        <option value="ara">Ara — Grok (warm, friendly)</option>
       </select>
       <div class="tts-status" id="ttsStatus"></div>
       <button class="btn btn-tts" onclick="pregenTTS()">Pre-generate TTS (both voices)</button>
@@ -2681,8 +2727,10 @@ textarea { min-height: 120px; resize: vertical; }
       <div>
         <label>Voice</label>
         <select id="buildVoice">
-          <option value="nova">Nova (gentle)</option>
-          <option value="sage">Sage (playful)</option>
+          <option value="nova">Nova — OpenAI (gentle)</option>
+          <option value="sage">Sage — OpenAI (playful)</option>
+          <option value="eve">Eve — Grok (energetic)</option>
+          <option value="ara">Ara — Grok (warm)</option>
         </select>
       </div>
       <div>
