@@ -60,6 +60,8 @@ class ImageGenerator:
         self._character_visual_sheet: str | None = None
         # Prior scene PIL images for Gemini visual context
         self._prior_scene_images: list = []
+        # Character portraits: name -> file path (for portrait-first pipeline)
+        self._portrait_paths: dict[str, str] = {}
 
     # ------------------------------------------------------------------ #
     #  CDN download helper (CogView returns a URL, not raw bytes)
@@ -213,6 +215,95 @@ Total response MUST be under 600 characters. No headers, no bullet points, no ex
                 f"{c['name']}: {c['description'][:120]}"
                 for c in characters
             )[:500]
+
+    # ------------------------------------------------------------------ #
+    #  Portrait-first pipeline: generate character portraits
+    # ------------------------------------------------------------------ #
+
+    def generate_character_portraits(
+        self, story: dict, output_dir: str, progress_callback=None,
+    ) -> dict[str, str]:
+        """Generate isolated character portraits for reference in scene generation.
+
+        Returns dict mapping character name -> portrait file path.
+        Portraits are saved to output_dir/portraits/ subfolder.
+        """
+        style = self.animation_style
+        characters = story["characters"]
+        portraits_dir = os.path.join(output_dir, "portraits")
+        os.makedirs(portraits_dir, exist_ok=True)
+
+        portrait_paths = {}
+
+        for idx, char in enumerate(characters):
+            char_name = char["name"]
+            safe_name = char_name.lower().replace(" ", "_").replace("'", "")
+            portrait_path = os.path.join(portraits_dir, f"{safe_name}.png")
+
+            if progress_callback:
+                progress_callback(idx + 1, len(characters), "portrait")
+
+            gender = self._gender_prefix(char)
+            if gender:
+                gender += " "
+
+            prompt = f"""Children's picture book character design sheet. {style['description']}
+
+This is a character for an illustrated bedtime storybook for toddlers aged 2-4.
+
+Draw this SINGLE character standing in a friendly neutral pose on a plain soft cream background.
+Full body view, 3/4 angle. Cheerful, warm expression. Arms relaxed.
+
+Character: {char_name} — {gender}{char['type']}
+Appearance: {char['description']}
+
+RULES:
+- {style['image_rules']}
+- This is for a wholesome children's book — warm, innocent, age-appropriate
+- Draw ONLY this ONE character on a plain cream background
+- Full body visible from head to feet
+- Match the character description precisely
+- NO text, words, letters, or numbers in the image"""
+
+            for attempt in range(3):
+                try:
+                    result = self.openai_client.images.generate(
+                        model="gpt-image-1-mini",
+                        prompt=prompt,
+                        n=1,
+                        size="1024x1024",
+                        quality="medium",
+                    )
+                    image_bytes = base64.b64decode(result.data[0].b64_json)
+
+                    # Validate portrait isn't a black/blank image
+                    img = Image.open(io.BytesIO(image_bytes))
+                    pixels = list(img.getdata())
+                    avg_brightness = sum(sum(p[:3]) / 3 for p in pixels) / len(pixels)
+                    if avg_brightness < 10:  # Nearly all-black
+                        print(f"   Portrait for {char_name} is black, retrying...")
+                        time.sleep(2)
+                        continue
+
+                    with open(portrait_path, "wb") as f:
+                        f.write(image_bytes)
+                    portrait_paths[char_name] = portrait_path
+                    print(f"   Portrait: {char_name} ({char['type']}) ✓")
+                    break
+
+                except Exception as e:
+                    if attempt < 2:
+                        print(f"   Portrait for {char_name} failed ({e}), retrying...")
+                        time.sleep(3)
+                    else:
+                        print(f"   Portrait for {char_name} failed after 3 attempts: {e}")
+
+            # Rate limit
+            if idx < len(characters) - 1:
+                time.sleep(1.5)
+
+        self._portrait_paths = portrait_paths
+        return portrait_paths
 
     def _build_minimax_prompt(self, story: dict, scene: dict, scene_index: int) -> str:
         """
@@ -682,6 +773,23 @@ RULES:
 
         return prompt
 
+    def _get_scene_portrait_files(self, story: dict, scene: dict, scene_index: int) -> list[str]:
+        """Get portrait file paths for characters present in this scene."""
+        if not self._portrait_paths:
+            return []
+
+        all_chars = story["characters"]
+        combined_text = scene.get("image_description", "") + " " + scene.get("text", "")
+
+        if scene_index == 0:
+            scene_chars = all_chars
+        else:
+            scene_chars = [c for c in all_chars if self._char_name_in_text(c["name"], combined_text)]
+            if not scene_chars:
+                scene_chars = all_chars
+
+        return [self._portrait_paths[c["name"]] for c in scene_chars if c["name"] in self._portrait_paths]
+
     def _generate_with_gpt_image(
         self,
         story: dict,
@@ -691,37 +799,42 @@ RULES:
         retry_count: int = 3,
     ) -> str:
         """Generate an illustration for a single scene using gpt-image-1-mini.
-        For scenes 2+, passes scene 1 image as reference for character consistency."""
+        Uses character portraits as reference via images.edit() for consistency."""
         prompt = self._build_gpt_image_prompt(story, scene, scene_index)
 
-        for attempt in range(retry_count):
-            try:
-                # Build API call params
-                api_params = {
-                    "model": "gpt-image-1-mini",
-                    "prompt": prompt,
-                    "size": self.size,
-                    "quality": "medium",
-                }
+        # Get portrait references for characters in this scene
+        portrait_file_paths = self._get_scene_portrait_files(story, scene, scene_index)
 
-                # Always use images.generate() for scene creation
-                # (images.edit() copies poses/positions from reference — kills variety)
-                # Character consistency comes from the text-based visual sheet in the prompt
-                result = self.openai_client.images.generate(**api_params)
+        for attempt in range(retry_count):
+            portrait_files = []
+            try:
+                if portrait_file_paths:
+                    # Portrait-first pipeline: use images.edit() with character portraits
+                    portrait_files = [open(p, "rb") for p in portrait_file_paths]
+
+                    # Prepend children's book context to the prompt for moderation safety
+                    safe_prompt = f"Illustrated children's bedtime storybook scene for toddlers aged 2-4.\nThe attached reference images show each character's appearance for this children's book. Match their appearance PRECISELY but draw them in new poses.\n\n{prompt}"
+
+                    result = self.openai_client.images.edit(
+                        model="gpt-image-1-mini",
+                        image=portrait_files,
+                        prompt=safe_prompt,
+                        size=self.size,
+                        quality="medium",
+                    )
+                else:
+                    # Fallback: no portraits available, use generate()
+                    result = self.openai_client.images.generate(
+                        model="gpt-image-1-mini",
+                        prompt=prompt,
+                        n=1,
+                        size=self.size,
+                        quality="medium",
+                    )
 
                 image_bytes = base64.b64decode(result.data[0].b64_json)
                 with open(output_path, "wb") as f:
                     f.write(image_bytes)
-
-                # After scene 1: save as reference + analyze visual sheet
-                if scene_index == 0:
-                    self._reference_image_path = output_path
-                    print("   Analyzing scene 1 for character visual consistency...")
-                    self._character_visual_sheet = self._analyze_reference_image(
-                        output_path, story["characters"]
-                    )
-                    if self._character_visual_sheet:
-                        print(f"   Character sheet extracted ({len(self._character_visual_sheet)} chars)")
 
                 # Track recent scene paths for continuity references
                 self._recent_scene_paths.append(output_path)
@@ -729,6 +842,12 @@ RULES:
                 return output_path
 
             except Exception as e:
+                if "moderation" in str(e).lower() or "safety" in str(e).lower():
+                    # Moderation block — retry without portraits as fallback
+                    if attempt < retry_count - 1:
+                        print(f"   Moderation block on scene {scene['scene_number']}, retrying...")
+                        time.sleep(3)
+                        continue
                 if attempt < retry_count - 1:
                     wait_time = (attempt + 1) * 5
                     print(f"   GPT-image attempt {attempt+1} failed: {e}")
@@ -739,6 +858,9 @@ RULES:
                         f"Failed to generate image for scene {scene['scene_number']} "
                         f"after {retry_count} attempts: {e}"
                     )
+            finally:
+                for f in portrait_files:
+                    f.close()
 
     # ------------------------------------------------------------------ #
     #  Phase 1: Dispatcher — route to the configured provider
@@ -975,8 +1097,14 @@ Respond ONLY with JSON: {{"confidence": 0.85, "reason": "short note"}}"""
         self._recent_scene_paths = []
         self._character_visual_sheet = None
         self._prior_scene_images = []
+        self._portrait_paths = {}
 
-        # ── Phase 1: Generate all images with CogView-4 ──
+        # ── Phase 0: Generate character portraits (for gpt-image provider) ──
+        if self.image_provider == "gpt-image" and story.get("characters"):
+            print(f"  Generating {len(story['characters'])} character portraits...")
+            self.generate_character_portraits(story, output_dir, progress_callback)
+
+        # ── Phase 1: Generate all images ──
         for i, scene in enumerate(story["scenes"]):
             scene_num = scene["scene_number"]
             filename = f"scene_{scene_num:02d}_raw.png"

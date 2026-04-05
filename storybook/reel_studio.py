@@ -293,6 +293,30 @@ def get_scene_image(story_id: str, scene_num: int):
     raise HTTPException(404, "Image not found")
 
 
+@app.get("/api/stories/{story_id}/portraits")
+def get_story_portraits(story_id: str):
+    """List available character portraits for a story."""
+    staging_dir = os.path.join("reel_studio_cache", "staging")
+    for base_dir in [staging_dir, STORIES_DIR]:
+        portraits_dir = os.path.join(base_dir, story_id, "portraits")
+        if os.path.exists(portraits_dir):
+            files = [f for f in os.listdir(portraits_dir) if f.endswith(".png")]
+            return {"portraits": [{"name": f.replace(".png", "").replace("_", " ").title(),
+                                   "url": f"/api/stories/{story_id}/portrait/{f}"} for f in sorted(files)]}
+    return {"portraits": []}
+
+
+@app.get("/api/stories/{story_id}/portrait/{filename}")
+def get_portrait_image(story_id: str, filename: str):
+    """Serve a character portrait image."""
+    staging_dir = os.path.join("reel_studio_cache", "staging")
+    for base_dir in [staging_dir, STORIES_DIR]:
+        path = os.path.join(base_dir, story_id, "portraits", filename)
+        if os.path.exists(path):
+            return FileResponse(path)
+    raise HTTPException(404, "Portrait not found")
+
+
 @app.get("/api/stories/{story_id}/image/{scene_num}/backup")
 def get_scene_image_backup(story_id: str, scene_num: int):
     """Serve the backup (pre-correction) version of a scene image."""
@@ -929,16 +953,35 @@ RULES:
 - Warm, friendly expressions appropriate for a children's book
 - DO NOT include any text, words, letters, or numbers in the image"""
 
-    # Use reference image if available
-    if ref_img_path:
-        with open(ref_img_path, "rb") as ref_file:
+    # Collect reference images: prefer portraits, fallback to adjacent scene
+    ref_images = []
+
+    # Check for character portraits in the story directory
+    portraits_dir = os.path.join(story_dir, "portraits")
+    if os.path.exists(portraits_dir):
+        for pfile in sorted(os.listdir(portraits_dir)):
+            if pfile.endswith(".png"):
+                ref_images.append(os.path.join(portraits_dir, pfile))
+
+    # Fallback: use adjacent scene reference if no portraits
+    if not ref_images and ref_img_path:
+        ref_images.append(ref_img_path)
+
+    # Generate corrected image
+    if ref_images:
+        ref_files = [open(p, "rb") for p in ref_images]
+        try:
+            safe_prompt = f"Illustrated children's bedtime storybook scene for toddlers aged 2-4.\nThe attached reference images show character appearances. Match them PRECISELY.\n\n{prompt}"
             result = client.images.edit(
                 model="gpt-image-1-mini",
-                image=[ref_file],
-                prompt=prompt,
+                image=ref_files,
+                prompt=safe_prompt,
                 size=image_size,
                 quality="medium",
             )
+        finally:
+            for f in ref_files:
+                f.close()
     else:
         result = client.images.generate(
             model="gpt-image-1-mini",
@@ -2151,9 +2194,7 @@ def _build_single(req: BuildSingleRequest, job_id: str):
     build_jobs[job_id]["story"] = story
     build_jobs[job_id].update({"progress": 15, "message": f"Story: {story['title']}"})
 
-    # Phase 2: Generate images in STAGING directory (not published yet)
-    build_jobs[job_id].update({"phase": "images", "progress": 20, "message": "Generating images..."})
-
+    # Phase 2: Set up staging directory
     from utils import sanitize_folder_name as _sanitize
     staging_dir = os.path.join("reel_studio_cache", "staging")
     os.makedirs(staging_dir, exist_ok=True)
@@ -2167,13 +2208,24 @@ def _build_single(req: BuildSingleRequest, job_id: str):
     Config.IMAGE_SIZE = image_size
     img_gen = ImageGenerator(animation_style=style)
 
+    # Phase 2a: Generate character portraits (portrait-first pipeline)
+    if Config.IMAGE_PROVIDER == "gpt-image" and story.get("characters"):
+        num_chars = len(story["characters"])
+        build_jobs[job_id].update({"phase": "portraits", "progress": 16, "message": f"Creating {num_chars} character portraits..."})
+        portrait_paths = img_gen.generate_character_portraits(story, folder)
+        build_jobs[job_id]["portrait_paths"] = portrait_paths
+        build_jobs[job_id].update({"progress": 22, "message": f"{len(portrait_paths)} portraits ready"})
+
+    # Phase 2b: Generate scene images with portrait references
+    build_jobs[job_id].update({"phase": "images", "progress": 22, "message": "Generating images..."})
+
     total_scenes = len(story["scenes"])
     image_paths = []
 
     for i, scene in enumerate(story["scenes"]):
         scene_num = scene["scene_number"]
         build_jobs[job_id].update({
-            "progress": 20 + int(50 * (i / total_scenes)),
+            "progress": 22 + int(48 * (i / total_scenes)),
             "message": f"Painting scene {scene_num}/{total_scenes}...",
         })
 
@@ -2914,15 +2966,33 @@ function showQCReview(jobData) {
   const scores = jobData.qc_scores || [];
   qcStoryScenes = jobData.story?.scenes || [];
 
-  // Show character reference above QC grid
+  // Show character reference with portraits above QC grid
   const chars = jobData.story?.characters || [];
   const charRef = document.getElementById('qcCharRef');
   if (charRef && chars.length) {
-    charRef.innerHTML = '<strong>Characters:</strong> ' + chars.map(c =>
-      '<span style="display:inline-block; background:#FFF3E0; padding:2px 8px; border-radius:12px; margin:2px; font-size:12px;">' +
-      c.name + ' <span style="color:#8B7D6B;">(' + c.type + ')</span></span>'
-    ).join('');
-    charRef.style.display = 'block';
+    // Fetch portraits if available
+    fetch('/api/stories/' + currentStoryId + '/portraits').then(r => r.json()).then(pData => {
+      const portraits = pData.portraits || [];
+      let html = '<div style="display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end;">';
+      if (portraits.length) {
+        html += portraits.map(p =>
+          '<div style="text-align:center;">' +
+          '<img src="' + p.url + '?t=' + Date.now() + '" style="width:64px; height:64px; object-fit:cover; border-radius:10px; border:2px solid #EDE5D8;">' +
+          '<div style="font-size:11px; color:#654321; margin-top:2px;">' + p.name + '</div></div>'
+        ).join('');
+      } else {
+        html += chars.map(c =>
+          '<span style="display:inline-block; background:#FFF3E0; padding:4px 10px; border-radius:12px; font-size:12px;">' +
+          c.name + ' <span style="color:#8B7D6B;">(' + c.type + ')</span></span>'
+        ).join('');
+      }
+      html += '</div>';
+      charRef.innerHTML = html;
+      charRef.style.display = 'block';
+    }).catch(() => {
+      charRef.innerHTML = '<strong>Characters:</strong> ' + chars.map(c => c.name + ' (' + c.type + ')').join(', ');
+      charRef.style.display = 'block';
+    });
   }
 
   const grid = document.getElementById('qcGrid');
