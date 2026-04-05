@@ -29,8 +29,8 @@ class ImageGenerator:
 
     # Map IMAGE_SIZE to Grok aspect_ratio
     SIZE_TO_GROK_ASPECT = {
-        "1024x1536": "2:3",
-        "1536x1024": "3:2",
+        "1024x1536": "9:16",
+        "1536x1024": "16:9",
         "1024x1024": "1:1",
     }
 
