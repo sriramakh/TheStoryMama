@@ -476,8 +476,9 @@ def _generate_reel_impl(req: ReelRequest, job_id: str):
     jobs[job_id]["progress"] = 30
     jobs[job_id]["message"] = "Narration ready"
 
-    bgm_path = BGM_TRACKS.get(req.bgm)
-    if not bgm_path or not os.path.exists(bgm_path):
+    no_bgm = req.bgm == "none"
+    bgm_path = None if no_bgm else BGM_TRACKS.get(req.bgm)
+    if not no_bgm and (not bgm_path or not os.path.exists(bgm_path)):
         raise HTTPException(400, f"BGM not found: {req.bgm}")
 
     scenes = story["scenes"]
@@ -632,11 +633,15 @@ def _generate_reel_impl(req: ReelRequest, job_id: str):
     amix = "".join(f"[a{i}]" for i in range(n))
     af.append(f"{amix}amix=inputs={n}:duration=longest:normalize=0,apad=whole_dur={total_vid}[tts_mix]")
 
-    inputs_a.extend(["-stream_loop", "-1", "-i", bgm_path])
-    af.append(f"[{n}:a]aformat=channel_layouts=mono,atrim=0:{total_vid:.1f},volume={req.bgm_volume},"
-              f"afade=t=in:d=2,afade=t=out:st={total_vid - 3:.1f}:d=3,asetpts=PTS-STARTPTS[bgm_a]")
-    af.append(f"[tts_mix][bgm_a]amix=inputs=2:duration=first:normalize=0,"
-              f"aformat=channel_layouts=stereo[aout]")
+    if no_bgm:
+        # No background music — just TTS converted to stereo
+        af.append(f"[tts_mix]aformat=channel_layouts=stereo[aout]")
+    else:
+        inputs_a.extend(["-stream_loop", "-1", "-i", bgm_path])
+        af.append(f"[{n}:a]aformat=channel_layouts=mono,atrim=0:{total_vid:.1f},volume={req.bgm_volume},"
+                  f"afade=t=in:d=2,afade=t=out:st={total_vid - 3:.1f}:d=3,asetpts=PTS-STARTPTS[bgm_a]")
+        af.append(f"[tts_mix][bgm_a]amix=inputs=2:duration=first:normalize=0,"
+                  f"aformat=channel_layouts=stereo[aout]")
 
     jobs[job_id] = {"status": "running", "progress": 65, "message": "Mixing audio...", "result": None}
     audio_only = os.path.join(REELS_DIR, f"tmp_a_{uuid.uuid4().hex[:8]}.m4a")
@@ -1289,6 +1294,7 @@ h1 { color: #654321; margin-bottom: 8px; }
         <option value="Enchanted">Enchanted (soft, dreamy)</option>
         <option value="Adventurous1">Adventurous 1 (upbeat)</option>
         <option value="Adventurous2">Adventurous 2 (driving)</option>
+        <option value="none">No BGM (voice only)</option>
       </select>
 
       <label>TTS Volume</label>
@@ -2741,6 +2747,7 @@ textarea { min-height: 120px; resize: vertical; }
           <option value="Enchanted">Enchanted</option>
           <option value="Adventurous1">Adventurous 1</option>
           <option value="Adventurous2">Adventurous 2</option>
+          <option value="none">No BGM (voice only)</option>
         </select>
       </div>
       <div>
