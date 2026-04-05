@@ -964,11 +964,32 @@ RULES:
         for attempt in range(retry_count):
             try:
                 if portrait_file_paths:
-                    # Use Grok edit endpoint with portrait references
-                    ref_prompt = "The attached reference images show each character's appearance for this children's book. Match their appearance PRECISELY but draw them in new poses.\n\n" + safe_prompt
+                    # Use Grok edit endpoint with portrait sheet reference
+                    ref_prompt = "The attached reference sheet shows each character's appearance for this children's book. Match their appearance PRECISELY but draw them in new poses.\n\n" + safe_prompt
                     image_bytes = self._grok_edit_image(ref_prompt, portrait_file_paths, aspect_ratio)
+
+                    # Grok edit returns square images — crop to target aspect ratio
+                    img = Image.open(io.BytesIO(image_bytes))
+                    target_w, target_h = [int(x) for x in self.size.split("x")]
+                    target_ratio = target_w / target_h
+                    img_ratio = img.width / img.height
+
+                    if abs(img_ratio - target_ratio) > 0.05:
+                        # Crop center to target aspect ratio
+                        if target_ratio < 1:  # Portrait (e.g., 2:3)
+                            new_w = int(img.height * target_ratio)
+                            left = (img.width - new_w) // 2
+                            img = img.crop((left, 0, left + new_w, img.height))
+                        else:  # Landscape (e.g., 3:2)
+                            new_h = int(img.width / target_ratio)
+                            top = (img.height - new_h) // 2
+                            img = img.crop((0, top, img.width, top + new_h))
+
+                    buf = io.BytesIO()
+                    img.save(buf, format="PNG")
+                    image_bytes = buf.getvalue()
                 else:
-                    # No portraits — use generate endpoint via OpenAI SDK
+                    # No portraits — use generate endpoint (respects aspect_ratio)
                     result = self.grok_client.images.generate(
                         model="grok-imagine-image",
                         prompt=safe_prompt,
