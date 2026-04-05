@@ -27,8 +27,15 @@ class ImageGenerator:
 
     CONFIDENCE_THRESHOLD = 0.7
 
+    # Map IMAGE_SIZE to Grok aspect_ratio
+    SIZE_TO_GROK_ASPECT = {
+        "1024x1536": "2:3",
+        "1536x1024": "3:2",
+        "1024x1024": "1:1",
+    }
+
     def __init__(self, animation_style: dict | None = None):
-        self.image_provider = Config.IMAGE_PROVIDER  # "minimax" or "cogview"
+        self.image_provider = Config.IMAGE_PROVIDER  # "gpt-image", "grok-image", "minimax", "cogview"
         self.size = Config.IMAGE_SIZE
 
         # Primary image generator — conditional on provider
@@ -44,6 +51,10 @@ class ImageGenerator:
 
         # Reviewer: GPT-4o-mini vision via OpenAI
         self.openai_client = OpenAI(api_key=Config.OPENAI_API_KEY)
+
+        # Grok image client (xAI — OpenAI-compatible for generate, raw requests for edit)
+        self.grok_api_key = Config.GROK_API_KEY
+        self.grok_client = OpenAI(api_key=Config.GROK_API_KEY, base_url="https://api.x.ai/v1") if Config.GROK_API_KEY else None
 
         # Fallback generator: Gemini
         self.gemini_client = genai.Client(api_key=Config.GEMINI_API_KEY)
@@ -267,13 +278,22 @@ RULES:
 
             for attempt in range(3):
                 try:
-                    result = self.openai_client.images.generate(
-                        model="gpt-image-1-mini",
-                        prompt=prompt,
-                        n=1,
-                        size="1024x1024",
-                        quality="medium",
-                    )
+                    if self.image_provider == "grok-image" and self.grok_client:
+                        result = self.grok_client.images.generate(
+                            model="grok-imagine-image",
+                            prompt=prompt,
+                            n=1,
+                            response_format="b64_json",
+                            extra_body={"aspect_ratio": "1:1", "resolution": "2k"},
+                        )
+                    else:
+                        result = self.openai_client.images.generate(
+                            model="gpt-image-1-mini",
+                            prompt=prompt,
+                            n=1,
+                            size="1024x1024",
+                            quality="medium",
+                        )
                     image_bytes = base64.b64decode(result.data[0].b64_json)
 
                     # Validate portrait isn't a black/blank image
@@ -863,6 +883,97 @@ RULES:
                     f.close()
 
     # ------------------------------------------------------------------ #
+    #  Phase 1e: Generate a single scene with Grok Imagine (xAI Aurora)
+    # ------------------------------------------------------------------ #
+
+    def _grok_edit_image(self, prompt: str, image_paths: list[str], aspect_ratio: str = "2:3") -> bytes:
+        """Call Grok images/edits endpoint with reference images via raw HTTP (not OpenAI SDK).
+        The OpenAI SDK sends multipart/form-data which xAI doesn't support for edits."""
+        images = []
+        for p in image_paths:
+            with open(p, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("utf-8")
+            ext = "png" if p.endswith(".png") else "jpeg"
+            images.append({"url": f"data:image/{ext};base64,{b64}", "type": "image_url"})
+
+        body = {
+            "model": "grok-imagine-image",
+            "prompt": prompt,
+            "n": 1,
+            "response_format": "b64_json",
+            "aspect_ratio": aspect_ratio,
+            "resolution": "2k",
+        }
+        # Grok edit endpoint accepts single image or list
+        if len(images) == 1:
+            body["image"] = images[0]
+        else:
+            body["image"] = images
+
+        resp = requests.post(
+            "https://api.x.ai/v1/images/edits",
+            headers={
+                "Authorization": f"Bearer {self.grok_api_key}",
+                "Content-Type": "application/json",
+            },
+            json=body,
+            timeout=120,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return base64.b64decode(data["data"][0]["b64_json"])
+
+    def _generate_with_grok_image(
+        self,
+        story: dict,
+        scene: dict,
+        scene_index: int,
+        output_path: str,
+        retry_count: int = 3,
+    ) -> str:
+        """Generate a scene image using Grok Imagine (Aurora) model."""
+        prompt = self._build_gpt_image_prompt(story, scene, scene_index)
+        safe_prompt = f"Illustrated children's bedtime storybook scene for toddlers aged 2-4.\n{prompt}"
+
+        portrait_file_paths = self._get_scene_portrait_files(story, scene, scene_index)
+        aspect_ratio = self.SIZE_TO_GROK_ASPECT.get(self.size, "2:3")
+
+        for attempt in range(retry_count):
+            try:
+                if portrait_file_paths:
+                    # Use Grok edit endpoint with portrait references
+                    ref_prompt = "The attached reference images show each character's appearance for this children's book. Match their appearance PRECISELY but draw them in new poses.\n\n" + safe_prompt
+                    image_bytes = self._grok_edit_image(ref_prompt, portrait_file_paths, aspect_ratio)
+                else:
+                    # No portraits — use generate endpoint via OpenAI SDK
+                    result = self.grok_client.images.generate(
+                        model="grok-imagine-image",
+                        prompt=safe_prompt,
+                        n=1,
+                        response_format="b64_json",
+                        extra_body={"aspect_ratio": aspect_ratio, "resolution": "2k"},
+                    )
+                    image_bytes = base64.b64decode(result.data[0].b64_json)
+
+                with open(output_path, "wb") as f:
+                    f.write(image_bytes)
+
+                self._recent_scene_paths.append(output_path)
+                return output_path
+
+            except Exception as e:
+                if attempt < retry_count - 1:
+                    wait_time = (attempt + 1) * 5
+                    print(f"   Grok-image attempt {attempt+1} failed: {e}")
+                    print(f"   Retrying in {wait_time}s...")
+                    time.sleep(wait_time)
+                else:
+                    raise RuntimeError(
+                        f"Failed to generate image for scene {scene['scene_number']} "
+                        f"after {retry_count} attempts: {e}"
+                    )
+
+    # ------------------------------------------------------------------ #
     #  Phase 1: Dispatcher — route to the configured provider
     # ------------------------------------------------------------------ #
 
@@ -879,6 +990,8 @@ RULES:
             return self._generate_with_minimax(story, scene, scene_index, output_path, retry_count)
         elif self.image_provider == "gemini":
             return self._generate_with_gemini_primary(story, scene, scene_index, output_path, retry_count)
+        elif self.image_provider == "grok-image":
+            return self._generate_with_grok_image(story, scene, scene_index, output_path, retry_count)
         elif self.image_provider == "gpt-image":
             return self._generate_with_gpt_image(story, scene, scene_index, output_path, retry_count)
         else:
@@ -1099,8 +1212,8 @@ Respond ONLY with JSON: {{"confidence": 0.85, "reason": "short note"}}"""
         self._prior_scene_images = []
         self._portrait_paths = {}
 
-        # ── Phase 0: Generate character portraits (for gpt-image provider) ──
-        if self.image_provider == "gpt-image" and story.get("characters"):
+        # ── Phase 0: Generate character portraits (for gpt-image and grok-image providers) ──
+        if self.image_provider in ("gpt-image", "grok-image") and story.get("characters"):
             print(f"  Generating {len(story['characters'])} character portraits...")
             self.generate_character_portraits(story, output_dir, progress_callback)
 

@@ -1876,6 +1876,7 @@ class BuildSingleRequest(BaseModel):
     layout: str = "portrait"  # "portrait" or "landscape"
     style: str = "animation_movie"
     story_model: str = "grok-4-1-fast"  # "grok-4-1-fast" or "gpt-4o-mini"
+    image_model: str = "gpt-image"  # "gpt-image" or "grok-image"
     description: str | None = None
     num_scenes: int = 12
     scenes: list[dict] | None = None  # For manual: [{scene_number, text, image_description, background}]
@@ -1886,6 +1887,7 @@ class BuildBatchRequest(BaseModel):
     layout: str = "portrait"
     style: str = "animation_movie"
     story_model: str = "grok-4-1-fast"
+    image_model: str = "gpt-image"
 
 
 class SceneEditRequest(BaseModel):
@@ -1908,6 +1910,7 @@ class BuildWithStoryRequest(BaseModel):
     layout: str = "portrait"
     num_scenes: int = 12
     story_model: str = "grok-4-1-fast"
+    image_model: str = "gpt-image"
     story: dict  # The reviewed story data
 
 
@@ -1919,6 +1922,7 @@ def start_single_build_with_story(req: BuildWithStoryRequest):
     build_req = BuildSingleRequest(
         mode="manual", style=req.style, layout=req.layout,
         num_scenes=req.num_scenes, story_model=req.story_model,
+        image_model=req.image_model,
     )
     build_jobs[job_id] = {
         "type": "single",
@@ -2203,13 +2207,15 @@ def _build_single(req: BuildSingleRequest, job_id: str):
     os.makedirs(folder, exist_ok=True)
     save_story_json(story, folder)
 
-    # Override image size for this generation
+    # Override image size and provider for this generation
     old_size = Config.IMAGE_SIZE
+    old_provider = Config.IMAGE_PROVIDER
     Config.IMAGE_SIZE = image_size
+    Config.IMAGE_PROVIDER = req.image_model
     img_gen = ImageGenerator(animation_style=style)
 
     # Phase 2a: Generate character portraits (portrait-first pipeline)
-    if Config.IMAGE_PROVIDER == "gpt-image" and story.get("characters"):
+    if req.image_model in ("gpt-image", "grok-image") and story.get("characters"):
         num_chars = len(story["characters"])
         build_jobs[job_id].update({"phase": "portraits", "progress": 16, "message": f"Creating {num_chars} character portraits..."})
         portrait_paths = img_gen.generate_character_portraits(story, folder)
@@ -2236,6 +2242,7 @@ def _build_single(req: BuildSingleRequest, job_id: str):
         time.sleep(1.5)
 
     Config.IMAGE_SIZE = old_size
+    Config.IMAGE_PROVIDER = old_provider
     build_jobs[job_id]["image_paths"] = image_paths
 
     # Phase 3: QC scoring
@@ -2340,14 +2347,17 @@ def _build_batch(req: BuildBatchRequest, job_id: str):
             folder = create_story_folder(Config.OUTPUT_DIR, serial, story["title"])
             save_story_json(story, folder)
 
-            # Generate images with correct size
+            # Generate images with correct size and provider
             old_size = Config.IMAGE_SIZE
+            old_provider = Config.IMAGE_PROVIDER
             Config.IMAGE_SIZE = image_size
+            Config.IMAGE_PROVIDER = req.image_model
             img_gen = ImageGenerator(animation_style=style)
 
             raw_paths = img_gen.generate_all_images(story=story, output_dir=folder)
 
             Config.IMAGE_SIZE = old_size
+            Config.IMAGE_PROVIDER = old_provider
 
             # Overlay + web images
             overlay = TextOverlay()
@@ -2509,6 +2519,12 @@ textarea { min-height: 120px; resize: vertical; }
   <select id="storyModel">
     <option value="grok-4-1-fast" selected>Grok 4-1 Fast (default)</option>
     <option value="gpt-4o-mini">GPT-4o Mini</option>
+  </select>
+
+  <label>Image Model</label>
+  <select id="imageModel">
+    <option value="gpt-image" selected>GPT Image Mini (default)</option>
+    <option value="grok-image">Grok Imagine (Aurora)</option>
   </select>
 
   <label>Number of Scenes</label>
@@ -2679,6 +2695,12 @@ textarea { min-height: 120px; resize: vertical; }
     <option value="gpt-4o-mini">GPT-4o Mini</option>
   </select>
 
+  <label>Image Model</label>
+  <select id="batchImageModel">
+    <option value="gpt-image" selected>GPT Image Mini (default)</option>
+    <option value="grok-image">Grok Imagine (Aurora)</option>
+  </select>
+
   <p style="font-size:13px; color:#8B7D6B; margin-top:12px;">Art style: Animation Movie (default). Stories auto-published to website.</p>
 
   <div style="margin-top:20px;">
@@ -2807,7 +2829,10 @@ function showSceneReview(story) {
     <div style="background:#FFF9EB; border-radius:10px; padding:12px; margin-bottom:12px;">
       <div style="display:flex; justify-content:space-between; align-items:start;">
         <p style="font-size:16px; font-weight:700; color:#654321;">${story.title}</p>
-        <span style="font-size:10px; padding:3px 8px; background:#E8D5F5; color:#5B4370; border-radius:8px; white-space:nowrap;">${document.getElementById('storyModel').value}</span>
+        <div style="display:flex; gap:4px;">
+          <span style="font-size:10px; padding:3px 8px; background:#E8D5F5; color:#5B4370; border-radius:8px; white-space:nowrap;">${document.getElementById('storyModel').value}</span>
+          <span style="font-size:10px; padding:3px 8px; background:#D5E8F5; color:#2D5F7A; border-radius:8px; white-space:nowrap;">${document.getElementById('imageModel').value}</span>
+        </div>
       </div>
       <p style="font-size:12px; color:#8B7D6B; margin-top:4px;">Characters: ${story.characters.map(c => '<b>' + c.name + '</b> (' + c.type + ')').join(', ')}</p>
       ${story.moral ? '<p style="font-size:12px; color:#8B7D6B; margin-top:2px;">Moral: ' + story.moral + '</p>' : ''}
@@ -2899,6 +2924,7 @@ function approveScenes() {
       layout: selectedLayout,
       num_scenes: currentStory.scenes.length,
       story_model: document.getElementById('storyModel').value,
+      image_model: document.getElementById('imageModel').value,
       story: currentStory,
     }),
   }).then(r => r.json()).then(data => {
@@ -3283,7 +3309,7 @@ function startBatchBuild() {
   fetch('/api/build/batch', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({count: count, layout: batchLayout, style: 'animation_movie', story_model: document.getElementById('batchStoryModel').value}),
+    body: JSON.stringify({count: count, layout: batchLayout, style: 'animation_movie', story_model: document.getElementById('batchStoryModel').value, image_model: document.getElementById('batchImageModel').value}),
   }).then(r => r.json()).then(data => {
     pollBuildJob(data.job_id, 'batch');
   });
