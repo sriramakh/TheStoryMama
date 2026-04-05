@@ -1720,7 +1720,14 @@ textarea { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #E
   <label style="font-size:13px; font-weight:600; display:block; margin-bottom:4px;">What needs to be corrected?</label>
   <textarea id="feedbackInput" placeholder="e.g. Lily should have brown skin matching scene 2. The fox should not be in this scene. Change the background to a sunny meadow."></textarea>
 
-  <div class="btn-row">
+  <div class="btn-row" style="display:flex; gap:10px; align-items:end;">
+    <div>
+      <label style="font-size:11px; margin:0;">Fix with model</label>
+      <select id="qcFixModel" style="padding:8px; font-size:13px;">
+        <option value="gpt-image">GPT Image Mini</option>
+        <option value="grok-image">Grok Imagine</option>
+      </select>
+    </div>
     <button class="btn btn-fix" id="fixBtn" onclick="submitCorrection()">Regenerate Scene</button>
   </div>
 
@@ -1839,6 +1846,7 @@ function submitCorrection() {
       story_id: storyData.id,
       scene_number: selectedScene.scene_number,
       feedback: feedback,
+      image_model: document.getElementById('qcFixModel').value,
     }),
   })
   .then(r => r.json())
@@ -2623,7 +2631,16 @@ textarea { min-height: 120px; resize: vertical; }
       <div id="fixContextArea"></div>
       <label style="margin-top:12px;">What needs to be fixed?</label>
       <textarea id="fixFeedback" placeholder="e.g. Mia should have brown curly hair, the bird should be smaller, change background to a sunny garden..." style="min-height:80px;"></textarea>
-      <button class="btn btn-primary" id="fixSubmitBtn" onclick="submitInlineFix()" style="margin-top:10px; font-size:13px; padding:10px 20px;">Regenerate Scene</button>
+      <div style="display:flex; gap:10px; align-items:end; margin-top:10px;">
+        <div style="flex:1;">
+          <label style="margin-top:0; font-size:11px;">Fix with model</label>
+          <select id="fixImageModel" style="padding:8px;">
+            <option value="gpt-image">GPT Image Mini</option>
+            <option value="grok-image">Grok Imagine</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" id="fixSubmitBtn" onclick="submitInlineFix()" style="font-size:13px; padding:10px 20px;">Regenerate Scene</button>
+      </div>
       <div id="fixProgress" class="hidden" style="margin-top:10px;">
         <div class="progress-bar"><div class="progress-fill" id="fixProgressFill"></div></div>
         <div class="progress-msg" id="fixProgressMsg">Fixing...</div>
@@ -3098,6 +3115,9 @@ function openInlineFix(sceneNum, storyId) {
   document.getElementById('inlineCorrection').classList.remove('hidden');
   document.getElementById('fixSceneNum').textContent = '#' + sceneNum;
   document.getElementById('fixFeedback').value = '';
+  // Default fix model to the model used for image generation
+  const imgModelEl = document.getElementById('imageModel');
+  if (imgModelEl) document.getElementById('fixImageModel').value = imgModelEl.value;
   document.getElementById('fixProgress').classList.add('hidden');
   document.getElementById('fixCompare').classList.add('hidden');
   document.getElementById('fixApprovalBtns').classList.add('hidden');
@@ -3149,7 +3169,7 @@ function submitInlineFix() {
   fetch('/api/correct-scene', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ story_id: storyIdForFix, scene_number: fixingSceneNum, feedback: feedback, image_model: document.getElementById('imageModel') ? document.getElementById('imageModel').value : 'gpt-image' }),
+    body: JSON.stringify({ story_id: storyIdForFix, scene_number: fixingSceneNum, feedback: feedback, image_model: document.getElementById('fixImageModel').value }),
   }).then(r => r.json()).then(data => {
     if (data.job_id) pollFixJob(data.job_id);
   }).catch(e => {
