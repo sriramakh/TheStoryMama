@@ -886,29 +886,52 @@ RULES:
     #  Phase 1e: Generate a single scene with Grok Imagine (xAI Aurora)
     # ------------------------------------------------------------------ #
 
-    def _grok_edit_image(self, prompt: str, image_paths: list[str], aspect_ratio: str = "2:3") -> bytes:
-        """Call Grok images/edits endpoint with reference images via raw HTTP (not OpenAI SDK).
-        The OpenAI SDK sends multipart/form-data which xAI doesn't support for edits."""
-        data_uris = []
+    @staticmethod
+    def _create_portrait_sheet(image_paths: list[str], max_size: int = 512) -> bytes:
+        """Combine multiple character portraits into a single reference sheet image.
+        Grok edit only supports 1-2 images, so we merge all portraits into one grid."""
+        portraits = []
         for p in image_paths:
-            with open(p, "rb") as f:
+            img = Image.open(p).convert("RGB")
+            # Resize each portrait to fit in grid
+            cell_size = max_size // max(2, len(image_paths))
+            img = img.resize((cell_size, cell_size), Image.LANCZOS)
+            portraits.append(img)
+
+        # Arrange in a row
+        total_w = sum(p.width for p in portraits)
+        max_h = max(p.height for p in portraits)
+        sheet = Image.new("RGB", (total_w, max_h), (245, 237, 224))
+        x = 0
+        for p in portraits:
+            sheet.paste(p, (x, 0))
+            x += p.width
+
+        buf = io.BytesIO()
+        sheet.save(buf, format="JPEG", quality=80)
+        return buf.getvalue()
+
+    def _grok_edit_image(self, prompt: str, image_paths: list[str], aspect_ratio: str = "2:3") -> bytes:
+        """Call Grok images/edits endpoint with reference images via raw HTTP.
+        Merges all portraits into a single reference sheet (Grok only supports 1-2 images)."""
+        if len(image_paths) > 1:
+            # Combine all portraits into one reference sheet
+            sheet_bytes = self._create_portrait_sheet(image_paths)
+            b64 = base64.b64encode(sheet_bytes).decode("utf-8")
+            image_data = {"url": f"data:image/jpeg;base64,{b64}", "type": "image_url"}
+        else:
+            with open(image_paths[0], "rb") as f:
                 b64 = base64.b64encode(f.read()).decode("utf-8")
-            ext = "png" if p.endswith(".png") else "jpeg"
-            data_uris.append(f"data:image/{ext};base64,{b64}")
+            ext = "png" if image_paths[0].endswith(".png") else "jpeg"
+            image_data = {"url": f"data:image/{ext};base64,{b64}", "type": "image_url"}
 
         body = {
             "model": "grok-imagine-image",
             "prompt": prompt,
             "n": 1,
             "response_format": "b64_json",
-            "aspect_ratio": aspect_ratio,
-            "resolution": "2k",
+            "image": image_data,
         }
-        # Single image: pass as object with url+type. Multiple: pass as list of data URI strings.
-        if len(data_uris) == 1:
-            body["image"] = {"url": data_uris[0], "type": "image_url"}
-        else:
-            body["image"] = data_uris
 
         resp = requests.post(
             "https://api.x.ai/v1/images/edits",
