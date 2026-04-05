@@ -1,7 +1,8 @@
 import { MetadataRoute } from "next";
 
 const BASE_URL = "https://www.thestorymama.club";
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.thestorymama.club";
+// Always use production API for sitemap (runs server-side on Vercel, not localhost)
+const API_URL = "https://api.thestorymama.club";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const staticPages: MetadataRoute.Sitemap = [
