@@ -889,12 +889,12 @@ RULES:
     def _grok_edit_image(self, prompt: str, image_paths: list[str], aspect_ratio: str = "2:3") -> bytes:
         """Call Grok images/edits endpoint with reference images via raw HTTP (not OpenAI SDK).
         The OpenAI SDK sends multipart/form-data which xAI doesn't support for edits."""
-        images = []
+        data_uris = []
         for p in image_paths:
             with open(p, "rb") as f:
                 b64 = base64.b64encode(f.read()).decode("utf-8")
             ext = "png" if p.endswith(".png") else "jpeg"
-            images.append({"url": f"data:image/{ext};base64,{b64}", "type": "image_url"})
+            data_uris.append(f"data:image/{ext};base64,{b64}")
 
         body = {
             "model": "grok-imagine-image",
@@ -904,11 +904,11 @@ RULES:
             "aspect_ratio": aspect_ratio,
             "resolution": "2k",
         }
-        # Grok edit endpoint accepts single image or list
-        if len(images) == 1:
-            body["image"] = images[0]
+        # Single image: pass as object with url+type. Multiple: pass as list of data URI strings.
+        if len(data_uris) == 1:
+            body["image"] = {"url": data_uris[0], "type": "image_url"}
         else:
-            body["image"] = images
+            body["image"] = data_uris
 
         resp = requests.post(
             "https://api.x.ai/v1/images/edits",
