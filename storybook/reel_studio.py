@@ -781,6 +781,7 @@ class CorrectionRequest(BaseModel):
     story_id: str
     scene_number: int
     feedback: str  # e.g. "Lily should have brown skin not white", "Remove the fox from this scene"
+    image_model: str = "gpt-image"  # "gpt-image" or "grok-image"
 
 
 @app.get("/api/stories/{story_id}/details")
@@ -865,6 +866,14 @@ def _correct_scene_impl(req: CorrectionRequest, job_id: str):
 
     style_key = story.get("animation_style", Config.DEFAULT_ANIMATION_STYLE)
     style = Config.ANIMATION_STYLES.get(style_key, Config.ANIMATION_STYLES[Config.DEFAULT_ANIMATION_STYLE])
+
+    # Determine image model: explicit from request > saved in story > default
+    image_model = req.image_model
+    if image_model == "gpt-image":
+        # Check if story was generated with a different model
+        story_model = story.get("image_model")
+        if story_model:
+            image_model = story_model
 
     # Step 1: Analyze context — get visual reference from adjacent scenes
     jobs[job_id] = {"status": "running", "progress": 10, "message": "Analyzing context...", "result": None}
@@ -967,15 +976,53 @@ RULES:
     if not ref_images and ref_img_path:
         ref_images.append(ref_img_path)
 
-    # Generate corrected image
-    if ref_images:
+    # Generate corrected image using the appropriate model
+    safe_prompt = f"Illustrated children's bedtime storybook scene for toddlers aged 2-4.\n{prompt}"
+
+    if image_model == "grok-image":
+        # Grok: use images.generate() with visual sheet from portraits
+        from image_generator import ImageGenerator
+        grok_client = OpenAI(api_key=Config.GROK_API_KEY, base_url="https://api.x.ai/v1")
+        aspect_map = {"1024x1536": "9:16", "1536x1024": "16:9", "1024x1024": "1:1"}
+        aspect = aspect_map.get(image_size, "9:16")
+
+        # Extract visual sheet from portraits if available
+        sheet_section = ""
+        if ref_images:
+            sheets = []
+            for rp in ref_images:
+                try:
+                    with open(rp, "rb") as rf:
+                        rb64 = base64.b64encode(rf.read()).decode()
+                    name = os.path.basename(rp).replace(".png", "").replace("_", " ").title()
+                    vr = client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[{"role": "user", "content": [
+                            {"type": "text", "text": f"Describe this children's book character '{name}' in ONE dense line. Include: species/type, gender, skin/fur color, clothing colors, accessories. Be precise."},
+                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{rb64}", "detail": "low"}}
+                        ]}], max_tokens=150)
+                    sheets.append(f"{name}: {vr.choices[0].message.content.strip()}")
+                except Exception:
+                    pass
+            if sheets:
+                sheet_section = "\nCHARACTER VISUAL REFERENCE:\n" + "\n".join(sheets) + "\n"
+
+        grok_prompt = f"{safe_prompt}\n{sheet_section}\nCORRECTION: {req.feedback}\nApply the correction precisely."
+        result = grok_client.images.generate(
+            model="grok-imagine-image",
+            prompt=grok_prompt,
+            n=1,
+            response_format="b64_json",
+            extra_body={"aspect_ratio": aspect, "resolution": "2k"},
+        )
+    elif ref_images:
+        # GPT: use images.edit() with portrait files as reference
         ref_files = [open(p, "rb") for p in ref_images]
         try:
-            safe_prompt = f"Illustrated children's bedtime storybook scene for toddlers aged 2-4.\nThe attached reference images show character appearances. Match them PRECISELY.\n\n{prompt}"
             result = client.images.edit(
                 model="gpt-image-1-mini",
                 image=ref_files,
-                prompt=safe_prompt,
+                prompt=f"The attached references show character appearances. Match them PRECISELY.\n\n{safe_prompt}",
                 size=image_size,
                 quality="medium",
             )
@@ -983,9 +1030,10 @@ RULES:
             for f in ref_files:
                 f.close()
     else:
+        # GPT: no references, generate from scratch
         result = client.images.generate(
             model="gpt-image-1-mini",
-            prompt=prompt,
+            prompt=safe_prompt,
             size=image_size,
             quality="medium",
         )
@@ -2205,6 +2253,7 @@ def _build_single(req: BuildSingleRequest, job_id: str):
     folder_name = f"staging_{job_id}_{_sanitize(story['title'])}"
     folder = os.path.join(staging_dir, folder_name)
     os.makedirs(folder, exist_ok=True)
+    story["image_model"] = req.image_model
     save_story_json(story, folder)
 
     # Override image size and provider for this generation
@@ -2338,6 +2387,7 @@ def _build_batch(req: BuildBatchRequest, job_id: str):
 
             story["animation_style"] = style_key
             story["orientation"] = orientation
+            story["image_model"] = req.image_model
             generated_titles.add(story["title"].lower())
 
             build_jobs[job_id]["message"] = f"Story {story_idx + 1}/{req.count}: {story['title']} — painting..."
@@ -3099,7 +3149,7 @@ function submitInlineFix() {
   fetch('/api/correct-scene', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ story_id: storyIdForFix, scene_number: fixingSceneNum, feedback: feedback }),
+    body: JSON.stringify({ story_id: storyIdForFix, scene_number: fixingSceneNum, feedback: feedback, image_model: document.getElementById('imageModel') ? document.getElementById('imageModel').value : 'gpt-image' }),
   }).then(r => r.json()).then(data => {
     if (data.job_id) pollFixJob(data.job_id);
   }).catch(e => {
