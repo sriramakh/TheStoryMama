@@ -27,7 +27,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   // Fetch story list for dynamic pages
   try {
-    const res = await fetch(`${API_URL}/api/v1/library/stories?limit=500`, {
+    const res = await fetch(`${API_URL}/api/v1/library?per_page=500`, {
       next: { revalidate: 3600 },
     });
     if (res.ok) {
