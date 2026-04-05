@@ -946,6 +946,37 @@ RULES:
         data = resp.json()
         return base64.b64decode(data["data"][0]["b64_json"])
 
+    def _extract_visual_sheet_from_portraits(self) -> str:
+        """Extract a text visual sheet from character portraits using GPT-4o-mini vision.
+        Called once after portraits are generated — gives Grok a detailed text reference."""
+        if not self._portrait_paths:
+            return ""
+
+        sheets = []
+        for name, path in self._portrait_paths.items():
+            if not os.path.exists(path):
+                continue
+            try:
+                with open(path, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("utf-8")
+                resp = self.openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": f"Describe this children's book character '{name}' in ONE dense line. Include: exact species/type, gender, skin/fur color, eye color, hair style, clothing colors & patterns, accessories, size/build. Be obsessively precise about colors."},
+                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}", "detail": "low"}}
+                        ]
+                    }],
+                    max_tokens=150,
+                )
+                sheets.append(f"{name}: {resp.choices[0].message.content.strip()}")
+            except Exception as e:
+                print(f"   Visual sheet for {name} failed: {e}")
+                continue
+
+        return "\n".join(sheets)
+
     def _generate_with_grok_image(
         self,
         story: dict,
@@ -954,50 +985,36 @@ RULES:
         output_path: str,
         retry_count: int = 3,
     ) -> str:
-        """Generate a scene image using Grok Imagine (Aurora) model."""
+        """Generate a scene image using Grok Imagine (Aurora) model.
+        Always uses images.generate() for native aspect ratio support.
+        Character consistency via text visual sheet extracted from portraits."""
         prompt = self._build_gpt_image_prompt(story, scene, scene_index)
-        safe_prompt = f"Illustrated children's bedtime storybook scene for toddlers aged 2-4.\n{prompt}"
+        aspect_ratio = self.SIZE_TO_GROK_ASPECT.get(self.size, "9:16")
 
-        portrait_file_paths = self._get_scene_portrait_files(story, scene, scene_index)
-        aspect_ratio = self.SIZE_TO_GROK_ASPECT.get(self.size, "2:3")
+        # Extract visual sheet from portraits on first scene (one-time cost)
+        if scene_index == 0 and self._portrait_paths and not self._character_visual_sheet:
+            print("   Extracting visual sheet from portraits...")
+            self._character_visual_sheet = self._extract_visual_sheet_from_portraits()
+            if self._character_visual_sheet:
+                print(f"   Visual sheet ready ({len(self._character_visual_sheet)} chars)")
+
+        # Inject visual sheet into prompt
+        sheet_section = ""
+        if self._character_visual_sheet:
+            sheet_section = f"\nCHARACTER VISUAL REFERENCE (match EXACTLY):\n{self._character_visual_sheet}\n"
+
+        safe_prompt = f"Illustrated children's bedtime storybook scene for toddlers aged 2-4.\n{sheet_section}\n{prompt}"
 
         for attempt in range(retry_count):
             try:
-                if portrait_file_paths:
-                    # Use Grok edit endpoint with portrait sheet reference
-                    ref_prompt = "The attached reference sheet shows each character's appearance for this children's book. Match their appearance PRECISELY but draw them in new poses.\n\n" + safe_prompt
-                    image_bytes = self._grok_edit_image(ref_prompt, portrait_file_paths, aspect_ratio)
-
-                    # Grok edit returns square images — crop to target aspect ratio
-                    img = Image.open(io.BytesIO(image_bytes))
-                    target_w, target_h = [int(x) for x in self.size.split("x")]
-                    target_ratio = target_w / target_h
-                    img_ratio = img.width / img.height
-
-                    if abs(img_ratio - target_ratio) > 0.05:
-                        # Crop center to target aspect ratio
-                        if target_ratio < 1:  # Portrait (e.g., 2:3)
-                            new_w = int(img.height * target_ratio)
-                            left = (img.width - new_w) // 2
-                            img = img.crop((left, 0, left + new_w, img.height))
-                        else:  # Landscape (e.g., 3:2)
-                            new_h = int(img.width / target_ratio)
-                            top = (img.height - new_h) // 2
-                            img = img.crop((0, top, img.width, top + new_h))
-
-                    buf = io.BytesIO()
-                    img.save(buf, format="PNG")
-                    image_bytes = buf.getvalue()
-                else:
-                    # No portraits — use generate endpoint (respects aspect_ratio)
-                    result = self.grok_client.images.generate(
-                        model="grok-imagine-image",
-                        prompt=safe_prompt,
-                        n=1,
-                        response_format="b64_json",
-                        extra_body={"aspect_ratio": aspect_ratio, "resolution": "2k"},
-                    )
-                    image_bytes = base64.b64decode(result.data[0].b64_json)
+                result = self.grok_client.images.generate(
+                    model="grok-imagine-image",
+                    prompt=safe_prompt,
+                    n=1,
+                    response_format="b64_json",
+                    extra_body={"aspect_ratio": aspect_ratio, "resolution": "2k"},
+                )
+                image_bytes = base64.b64decode(result.data[0].b64_json)
 
                 with open(output_path, "wb") as f:
                     f.write(image_bytes)
