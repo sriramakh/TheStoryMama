@@ -120,10 +120,11 @@ class TextOverlay:
         *text* and an optional *moral_text* footer.
         """
         img_w, img_h = img_size
-        padding = Config.TEXT_PADDING
-        margin_bottom = 35
-        tail_h = 18
-        bubble_radius = 25
+        scale = img_w / 1536
+        padding = max(20, int(Config.TEXT_PADDING * scale))
+        margin_bottom = max(20, int(35 * scale))
+        tail_h = max(10, int(18 * scale))
+        bubble_radius = max(15, int(25 * scale))
         max_text_width = img_w - padding * 4  # generous horizontal margin
 
         # --- measure body text ---
@@ -217,9 +218,10 @@ class TextOverlay:
     ):
         """Draw a warm banner bubble at the top of the image with the title."""
         img_w, _img_h = img_size
-        padding = Config.TEXT_PADDING
-        margin_top = 30
-        banner_radius = 25
+        scale = img_w / 1536
+        padding = max(20, int(Config.TEXT_PADDING * scale))
+        margin_top = max(15, int(30 * scale))
+        banner_radius = max(15, int(25 * scale))
         max_text_width = img_w - padding * 4
 
         lines, text_h, line_h = self._wrap_text(title, font, max_text_width)
@@ -276,18 +278,25 @@ class TextOverlay:
         overlay = Image.new("RGBA", (img_w, img_h), (0, 0, 0, 0))
         draw = ImageDraw.Draw(overlay)
 
+        # Scale font sizes proportionally to image width
+        # Reference: 1536px wide → body=32px, title=48px, moral=28px
+        scale = img_w / 1536
+        body_size = max(18, int(Config.FONT_SIZE_BODY * scale))
+        title_size = max(24, int(Config.FONT_SIZE_TITLE * scale))
+        moral_size = max(16, int(Config.FONT_SIZE_MORAL * scale))
+
         # Title banner (first scene only)
         if scene_number == 1 and title:
-            title_font = self._get_font(Config.FONT_SIZE_TITLE)
+            title_font = self._get_font(title_size)
             self._draw_title_banner(draw, (img_w, img_h), title, title_font)
 
         # Speech bubble with scene text (+ optional moral on last scene)
-        body_font = self._get_font(Config.FONT_SIZE_BODY)
+        body_font = self._get_font(body_size)
         moral_text = None
         moral_font = None
         if scene_number == total_scenes and moral:
             moral_text = moral
-            moral_font = self._get_font(Config.FONT_SIZE_MORAL)
+            moral_font = self._get_font(moral_size)
 
         self._draw_speech_bubble(
             draw, (img_w, img_h), text, body_font, moral_text, moral_font
