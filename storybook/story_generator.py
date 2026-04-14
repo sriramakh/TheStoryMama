@@ -338,10 +338,21 @@ Return your response as a JSON object with this EXACT structure:
              WHICH characters are present (by default ALL main characters, unless the plot
              requires someone to be absent — if so, state explicitly who is NOT in this scene),
              their positions, expressions, actions, key background elements, colors, mood.
-             Reference character descriptions EXACTLY for visual consistency."
+             Reference character descriptions EXACTLY for visual consistency.",
+            "sound_effects": [
+                {{"sfx": "knock", "timing": "after"}}
+            ]
         }}
     ]
 }}
+
+SOUND EFFECTS — enhance storytelling with ambient sounds. For each scene, optionally add 0-2
+sound effects from this list. Use "timing": "before" (plays before narration), "after" (plays
+after narration), or "during" (plays softly under narration).
+Available SFX: knock, thud, bump, door_creak, splash, whoosh, pop, footsteps, bell, chime,
+sparkle, magic_chime, magic_wand, dog_bark, cat_meow, bird_chirp, frog_ribbit, owl_hoot,
+rooster, rain, thunder, wind, giggle, applause, crowd_cheer, kids_cheer, success, creak.
+Only use SFX when they ADD to the story moment. Not every scene needs one. Use sparingly.
 
 IMPORTANT:
 - Generate exactly {num_scenes} scenes

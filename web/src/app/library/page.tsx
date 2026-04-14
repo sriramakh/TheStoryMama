@@ -6,9 +6,18 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { BookOpen, Search } from "lucide-react";
 
 export const metadata: Metadata = {
-  title: "Story Library - Free Bedtime Stories",
+  title: "Story Library - Free Bedtime Stories for Kids",
   description:
-    "Browse 1000+ free illustrated bedtime stories for children. Filter by category, art style, and more. New stories added daily!",
+    "Browse 200+ free illustrated bedtime stories for children. Filter by category, art style, and more. New stories added daily!",
+  alternates: { canonical: "https://www.thestorymama.club/library" },
+  openGraph: {
+    title: "Story Library - Free Bedtime Stories for Kids | TheStoryMama",
+    description:
+      "Browse 200+ free illustrated bedtime stories for children. Filter by category, art style, and more.",
+    url: "https://www.thestorymama.club/library",
+    siteName: "TheStoryMama",
+    type: "website",
+  },
 };
 
 function StoryGridSkeleton() {

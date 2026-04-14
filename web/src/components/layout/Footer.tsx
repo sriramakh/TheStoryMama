@@ -67,7 +67,7 @@ export function Footer() {
               </li>
               <li>
                 <Link
-                  href="/library?category=bedtime"
+                  href="/bedtime-stories-for-kids"
                   className="text-sm text-muted-foreground hover:text-foreground transition-colors"
                 >
                   Bedtime Stories
@@ -75,7 +75,7 @@ export function Footer() {
               </li>
               <li>
                 <Link
-                  href="/library?category=animals"
+                  href="/animal-stories-for-children"
                   className="text-sm text-muted-foreground hover:text-foreground transition-colors"
                 >
                   Animal Stories
@@ -83,10 +83,26 @@ export function Footer() {
               </li>
               <li>
                 <Link
-                  href="/library?category=adventure"
+                  href="/adventure-stories-for-kids"
                   className="text-sm text-muted-foreground hover:text-foreground transition-colors"
                 >
                   Adventure Stories
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/fantasy-stories-for-children"
+                  className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Fantasy Stories
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/friendship-stories-for-kids"
+                  className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Friendship Stories
                 </Link>
               </li>
             </ul>

@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { BookOpen, Heart } from "lucide-react";
+import { FloatingCreatures } from "./FloatingCreatures";
 
 export function Hero() {
   return (
-    <section className="relative overflow-hidden">
+    <section className="relative overflow-x-clip overflow-y-visible">
       {/* Background gradient */}
       <div className="absolute inset-0 bg-gradient-to-br from-[var(--color-pastel-pink)]/30 via-[var(--color-pastel-lavender)]/20 to-[var(--color-pastel-sky)]/30" />
 
@@ -13,6 +14,47 @@ export function Hero() {
       <div className="absolute top-40 right-20 w-24 h-24 rounded-full bg-[var(--color-pastel-mint)]/40 blur-xl" />
       <div className="absolute bottom-20 left-1/4 w-20 h-20 rounded-full bg-[var(--color-pastel-lavender)]/40 blur-xl" />
       <div className="absolute bottom-10 right-1/3 w-14 h-14 rounded-full bg-[var(--color-pastel-peach)]/40 blur-xl" />
+
+      {/* Bird & Butterfly — random floating */}
+      <FloatingCreatures />
+
+      {/* Monkey — top left corner */}
+      <video
+        className="absolute top-2 -left-4 w-48 sm:w-56 lg:w-72 z-10 pointer-events-none"
+        autoPlay muted loop playsInline
+      >
+        <source src="/animations/monkey_swinging.webm" type="video/webm" />
+      </video>
+
+      {/* Tiger — walks right to left, grows bigger as it approaches */}
+      <div className="absolute bottom-0 left-0 right-0 h-[500px] z-10 pointer-events-none overflow-visible" style={{overflow: 'visible'}}>
+        <video
+          className="absolute bottom-0 pointer-events-none"
+          style={{width: '500px'}}
+          autoPlay muted loop playsInline
+          id="tiger-video"
+        >
+          <source src="/animations/tiger_15s.webm" type="video/webm" />
+        </video>
+      </div>
+
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `
+            #tiger-video {
+              animation: tigerWalkRTL 15s linear infinite;
+            }
+            @keyframes tigerWalkRTL {
+              0% {
+                transform: translateX(calc(100vw + 100px)) scale(0.4);
+              }
+              100% {
+                transform: translateX(-600px) scale(1.5);
+              }
+            }
+          `,
+        }}
+      />
 
       <div className="relative mx-auto max-w-7xl px-4 py-20 sm:px-6 sm:py-28 lg:px-8 lg:py-36">
         <div className="text-center">

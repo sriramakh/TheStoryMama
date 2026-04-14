@@ -149,7 +149,7 @@ export function StoryReader({ story }: { story: Story }) {
           <div className="relative w-full h-full max-w-2xl mx-auto flex items-center justify-center">
             <img
               src={`${API_URL}/api/v1/stories/${story.id}/scenes/${scene.scene_number}/image`}
-              alt={`Scene ${scene.scene_number}`}
+              alt={`Illustrated scene ${scene.scene_number} from ${story.title}, a free children's bedtime story`}
               className="max-h-full max-w-full object-contain rounded-xl sm:rounded-2xl shadow-md"
             />
 

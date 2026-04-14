@@ -17,7 +17,7 @@ export function StoryCard({ story }: { story: Story }) {
           <div className="h-52 overflow-hidden bg-[var(--color-pastel-cream)]">
             <img
               src={coverUrl}
-              alt={story.title}
+              alt={`Cover image for ${story.title}${story.moral ? ` — ${story.moral}` : ", a free children's bedtime story"}`}
               className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-500"
               loading="lazy"
             />

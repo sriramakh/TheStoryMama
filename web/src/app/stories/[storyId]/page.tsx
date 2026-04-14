@@ -3,8 +3,27 @@ import { StoryReader } from "@/components/reader/StoryReader";
 import { getStory } from "@/lib/api";
 import { API_URL } from "@/lib/constants";
 
+const SITE_URL = "https://www.thestorymama.club";
+
 interface StoryPageProps {
   params: Promise<{ storyId: string }>;
+}
+
+function buildDescription(story: {
+  title: string;
+  moral?: string;
+  characters?: { name: string }[];
+  setting?: string;
+  categories?: string[];
+  category?: string;
+}): string {
+  const cats = story.categories?.length
+    ? story.categories[0]
+    : story.category || "wonder";
+  const tagline = story.moral
+    ? story.moral
+    : `A beautifully illustrated bedtime story featuring ${story.characters?.map((c) => c.name).join(", ") || "charming characters"}`;
+  return `${tagline}. Read ${story.title} free online at TheStoryMama — a beautifully illustrated bedtime story for children about ${cats}.`;
 }
 
 export async function generateMetadata({
@@ -13,25 +32,35 @@ export async function generateMetadata({
   const { storyId } = await params;
   try {
     const story = await getStory(storyId);
-    const characters = story.characters?.map((c) => c.name).join(", ");
-    const description = story.moral
-      ? `${story.moral} — A bedtime story featuring ${characters}.`
-      : `Read "${story.title}" — a beautiful illustrated bedtime story featuring ${characters}.`;
+    const description = buildDescription(story);
     const imageUrl = `${API_URL}/api/v1/stories/${storyId}/scenes/1/image`;
+    const canonical = `${SITE_URL}/stories/${storyId}`;
 
     return {
-      title: story.title,
+      // Use absolute so the suffix isn't stripped by the layout template
+      title: {
+        absolute: `${story.title} — Free Bedtime Story for Kids | TheStoryMama`,
+      },
       description,
+      alternates: { canonical },
       openGraph: {
-        title: story.title,
+        title: `${story.title} — Free Bedtime Story for Kids | TheStoryMama`,
         description,
         siteName: "TheStoryMama",
         type: "article",
-        images: [{ url: imageUrl, width: 1024, height: 1536, alt: story.title }],
+        url: canonical,
+        images: [
+          {
+            url: imageUrl,
+            width: story.orientation === "landscape" ? 1536 : 1024,
+            height: story.orientation === "landscape" ? 1024 : 1536,
+            alt: `Cover illustration for ${story.title}`,
+          },
+        ],
       },
       twitter: {
         card: "summary_large_image",
-        title: story.title,
+        title: `${story.title} — Free Bedtime Story`,
         description,
         images: [imageUrl],
       },
@@ -68,5 +97,74 @@ export default async function StoryPage({ params }: StoryPageProps) {
     );
   }
 
-  return <StoryReader story={story} />;
+  const canonical = `${SITE_URL}/stories/${storyId}`;
+  const imageUrl = `${API_URL}/api/v1/stories/${storyId}/scenes/1/image`;
+  const category = story.categories?.[0] || story.category || "children";
+
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "Book",
+    name: story.title,
+    description: story.moral || buildDescription(story),
+    genre: category,
+    audience: { "@type": "Audience", audienceType: "Children" },
+    publisher: {
+      "@type": "Organization",
+      name: "TheStoryMama",
+      url: SITE_URL,
+    },
+    image: imageUrl,
+    url: canonical,
+    isAccessibleForFree: true,
+    numberOfPages: story.scenes?.length ?? 0,
+    inLanguage: "en",
+    ...(story.characters && story.characters.length > 0 && {
+      character: story.characters.map((c) => ({
+        "@type": "Person",
+        name: c.name,
+      })),
+    }),
+  };
+
+  return (
+    <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
+
+      {/* Client-side reader (primary UX) */}
+      <StoryReader story={story} />
+
+      {/* SEO: full story transcript — visible to crawlers, hidden from users */}
+      <article className="sr-only" aria-hidden="true">
+        <h1>{story.title}</h1>
+        {story.moral && <p>{story.moral}</p>}
+        {story.setting && <p>Setting: {story.setting}</p>}
+        {story.characters && story.characters.length > 0 && (
+          <section>
+            <h2>Characters</h2>
+            <ul>
+              {story.characters.map((c) => (
+                <li key={c.name}>
+                  <strong>{c.name}</strong>
+                  {c.type ? ` — ${c.type}` : ""}
+                  {c.description ? `: ${c.description}` : ""}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+        <section>
+          <h2>Full Story</h2>
+          {story.scenes.map((scene) => (
+            <p key={scene.scene_number}>
+              <span>Scene {scene.scene_number}: </span>
+              {scene.text}
+            </p>
+          ))}
+        </section>
+      </article>
+    </>
+  );
 }

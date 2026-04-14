@@ -19,29 +19,45 @@ const quicksand = Quicksand({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://www.thestorymama.club"),
   title: {
-    default: "TheStoryMama - Magical Bedtime Stories for Children",
+    default:
+      "Free Bedtime Stories for Kids + Personalized Stories | TheStoryMama",
     template: "%s | TheStoryMama",
   },
   description:
-    "Beautiful bedtime stories made with love for your little one. Browse free illustrated stories or create personalized storybooks.",
+    "Browse 100+ free illustrated bedtime stories or create a personalized story starring your child. Beautiful art styles, PDF download, loved by parents.",
+  alternates: { canonical: "https://www.thestorymama.club" },
   keywords: [
     "bedtime stories",
-    "children stories",
-    "toddler stories",
-    "personalized storybook",
-    "kids bedtime",
-    "free bedtime stories",
-    "illustrated stories for kids",
+    "free bedtime stories for kids",
+    "personalized bedtime story",
+    "custom story with child's name",
+    "AI bedtime story for kids",
+    "illustrated stories for children",
+    "toddler bedtime stories",
+    "kids picture books online",
   ],
   icons: {
     icon: "/favicon.ico",
     apple: "/apple-touch-icon.png",
   },
   openGraph: {
+    title:
+      "Free Bedtime Stories for Kids + Personalized Stories | TheStoryMama",
+    description:
+      "Browse 100+ free illustrated bedtime stories or create a personalized story starring your child.",
     siteName: "TheStoryMama",
     type: "website",
+    url: "https://www.thestorymama.club",
     images: [{ url: "/og-logo.png", width: 512, height: 512 }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "TheStoryMama — Free & Personalized Bedtime Stories for Kids",
+    description:
+      "100+ free illustrated bedtime stories + personalized stories starring your child.",
+    images: ["/og-logo.png"],
   },
 };
 
