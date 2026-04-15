@@ -60,7 +60,7 @@ export default function SeriesListPage() {
                     <img
                       src={cover}
                       alt={`${s.title} — series cover`}
-                      className="max-h-full max-w-full object-contain group-hover:scale-[1.03] transition-transform duration-500"
+                      className="h-full w-full object-contain group-hover:scale-[1.03] transition-transform duration-500"
                       loading="lazy"
                     />
                   </div>

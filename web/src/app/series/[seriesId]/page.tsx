@@ -124,7 +124,7 @@ export default async function SeriesDetailPage({ params }: Props) {
                     <img
                       src={cover}
                       alt={`Cover for ${ep.title}`}
-                      className="max-h-full max-w-full object-contain group-hover:scale-[1.03] transition-transform duration-500"
+                      className="h-full w-full object-contain group-hover:scale-[1.03] transition-transform duration-500"
                       loading="lazy"
                     />
                     <div className="absolute top-2 left-2 bg-black/60 text-white text-xs px-2 py-1 rounded-md font-semibold">
