@@ -2,12 +2,29 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, ChevronRight, Download, X, Share2, Check } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, X, Share2, Check, Film } from "lucide-react";
 import { API_URL } from "@/lib/constants";
 import type { Story } from "@/types/story";
 
-export function StoryReader({ story }: { story: Story }) {
+interface SeriesNav {
+  seriesId: string;
+  seriesTitle: string;
+  episodeCode: string;
+  episodeIndex: number;
+  totalEpisodes: number;
+  prev?: { storyId: string; title: string; code: string };
+  next?: { storyId: string; title: string; code: string };
+}
+
+export function StoryReader({
+  story,
+  seriesNav,
+}: {
+  story: Story;
+  seriesNav?: SeriesNav;
+}) {
   const [currentScene, setCurrentScene] = useState(0);
   const totalScenes = story.scenes.length;
   const scene = story.scenes[currentScene];
@@ -120,9 +137,20 @@ export function StoryReader({ story }: { story: Story }) {
           >
             <X className="h-4 w-4 text-[var(--color-warm-brown)]" />
           </button>
-          <h1 className="text-sm sm:text-lg font-bold text-[var(--color-warm-brown)] font-[family-name:var(--font-quicksand)] truncate flex-1 mr-2">
-            {story.title}
-          </h1>
+          <div className="flex-1 min-w-0 mr-2">
+            {seriesNav && (
+              <Link
+                href={`/series/${seriesNav.seriesId}`}
+                className="inline-flex items-center gap-1 text-[10px] sm:text-xs font-semibold text-[var(--color-warm-brown)] bg-[var(--color-pastel-pink)] px-2 py-0.5 rounded-full hover:bg-[var(--color-pastel-rose)] transition-colors"
+              >
+                <Film className="h-2.5 w-2.5" />
+                {seriesNav.seriesTitle} · {seriesNav.episodeCode}
+              </Link>
+            )}
+            <h1 className="text-sm sm:text-lg font-bold text-[var(--color-warm-brown)] font-[family-name:var(--font-quicksand)] truncate">
+              {story.title}
+            </h1>
+          </div>
           <div className="flex items-center gap-2">
             <span className="text-xs sm:text-sm text-muted-foreground whitespace-nowrap">
               {currentScene + 1}/{totalScenes}
@@ -145,7 +173,39 @@ export function StoryReader({ story }: { story: Story }) {
       {/* Scene content: image + text — fills remaining viewport */}
       <div className="flex-1 flex flex-col min-h-0 px-2 sm:px-6 pb-2 sm:pb-4">
         {/* Image — takes most of the space */}
-        <div className="flex-1 min-h-0 flex items-center justify-center">
+        <div className="flex-1 min-h-0 flex items-center justify-center gap-2 lg:gap-4">
+          {/* Previous episode card — desktop only */}
+          {seriesNav?.prev && (
+            <Link
+              href={`/stories/${seriesNav.prev.storyId}`}
+              className="hidden lg:flex flex-col items-center justify-center w-40 xl:w-48 flex-shrink-0 group"
+              aria-label={`Previous episode: ${seriesNav.prev.title}`}
+            >
+              <div className="relative w-full aspect-[2/3] rounded-xl overflow-hidden shadow-md group-hover:shadow-xl transition-all bg-[var(--color-pastel-cream)] opacity-70 group-hover:opacity-100">
+                <img
+                  src={`${API_URL}/api/v1/stories/${seriesNav.prev.storyId}/scenes/1/image`}
+                  alt={`Previous episode cover: ${seriesNav.prev.title}`}
+                  className="h-full w-full object-cover"
+                  loading="lazy"
+                />
+                <div className="absolute top-2 left-2 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded font-bold">
+                  {seriesNav.prev.code}
+                </div>
+                <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/30 transition-colors">
+                  <div className="h-10 w-10 rounded-full bg-white/90 flex items-center justify-center shadow-lg">
+                    <ChevronLeft className="h-5 w-5 text-[var(--color-warm-brown)]" />
+                  </div>
+                </div>
+              </div>
+              <p className="mt-2 text-[11px] text-center text-muted-foreground uppercase tracking-wider font-semibold">
+                Previous
+              </p>
+              <p className="text-xs text-center text-[var(--color-warm-brown)] line-clamp-2 font-medium">
+                {seriesNav.prev.title}
+              </p>
+            </Link>
+          )}
+
           <div className="relative w-full h-full max-w-2xl mx-auto flex items-center justify-center">
             <img
               src={`${API_URL}/api/v1/stories/${story.id}/scenes/${scene.scene_number}/image`}
@@ -167,6 +227,38 @@ export function StoryReader({ story }: { story: Story }) {
               aria-label="Next scene"
             />
           </div>
+
+          {/* Next episode card — desktop only */}
+          {seriesNav?.next && (
+            <Link
+              href={`/stories/${seriesNav.next.storyId}`}
+              className="hidden lg:flex flex-col items-center justify-center w-40 xl:w-48 flex-shrink-0 group"
+              aria-label={`Next episode: ${seriesNav.next.title}`}
+            >
+              <div className="relative w-full aspect-[2/3] rounded-xl overflow-hidden shadow-md group-hover:shadow-xl transition-all bg-[var(--color-pastel-cream)] opacity-70 group-hover:opacity-100">
+                <img
+                  src={`${API_URL}/api/v1/stories/${seriesNav.next.storyId}/scenes/1/image`}
+                  alt={`Next episode cover: ${seriesNav.next.title}`}
+                  className="h-full w-full object-cover"
+                  loading="lazy"
+                />
+                <div className="absolute top-2 left-2 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded font-bold">
+                  {seriesNav.next.code}
+                </div>
+                <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/30 transition-colors">
+                  <div className="h-10 w-10 rounded-full bg-white/90 flex items-center justify-center shadow-lg">
+                    <ChevronRight className="h-5 w-5 text-[var(--color-warm-brown)]" />
+                  </div>
+                </div>
+              </div>
+              <p className="mt-2 text-[11px] text-center text-muted-foreground uppercase tracking-wider font-semibold">
+                Next Episode
+              </p>
+              <p className="text-xs text-center text-[var(--color-warm-brown)] line-clamp-2 font-medium">
+                {seriesNav.next.title}
+              </p>
+            </Link>
+          )}
         </div>
 
         {/* Story text — compact, always visible */}
@@ -229,18 +321,40 @@ export function StoryReader({ story }: { story: Story }) {
           </Button>
         </div>
 
-        {/* Download PDF — small link, not prominent */}
+        {/* Last scene: PDF + series navigation */}
         {isLast && (
-          <div className="text-center mt-2">
-            <a
-              href={`${API_URL}/api/v1/stories/${story.id}/pdf`}
-              target="_blank"
-              rel="noopener"
-              className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <Download className="h-3 w-3" />
-              Download PDF
-            </a>
+          <div className="text-center mt-2 space-y-2">
+            {seriesNav?.next && (
+              <div className="lg:hidden">
+                <Link
+                  href={`/stories/${seriesNav.next.storyId}`}
+                  className="inline-flex items-center gap-2 bg-[var(--color-pastel-pink)] hover:bg-[var(--color-pastel-rose)] text-[var(--color-warm-brown)] font-semibold text-sm px-4 py-2 rounded-xl shadow-sm transition-colors"
+                >
+                  Next Episode: {seriesNav.next.title}
+                  <ChevronRight className="h-4 w-4" />
+                </Link>
+              </div>
+            )}
+            <div className="flex items-center justify-center gap-4 flex-wrap">
+              <a
+                href={`${API_URL}/api/v1/stories/${story.id}/pdf`}
+                target="_blank"
+                rel="noopener"
+                className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <Download className="h-3 w-3" />
+                Download PDF
+              </a>
+              {seriesNav && (
+                <Link
+                  href={`/series/${seriesNav.seriesId}`}
+                  className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <Film className="h-3 w-3" />
+                  All {seriesNav.totalEpisodes} episodes
+                </Link>
+              )}
+            </div>
           </div>
         )}
       </div>

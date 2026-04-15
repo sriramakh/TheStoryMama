@@ -1,5 +1,6 @@
 import { MetadataRoute } from "next";
 import { CATEGORY_PAGES } from "@/lib/seo-categories";
+import { SERIES } from "@/lib/series";
 
 const BASE_URL = "https://www.thestorymama.club";
 // Always use production API for sitemap (runs server-side on Vercel, not localhost)
@@ -49,6 +50,22 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     priority: 0.85,
   }));
 
+  // Series pages
+  const seriesPages: MetadataRoute.Sitemap = [
+    {
+      url: `${BASE_URL}/series`,
+      lastModified: now,
+      changeFrequency: "weekly" as const,
+      priority: 0.85,
+    },
+    ...SERIES.map((s) => ({
+      url: `${BASE_URL}/series/${s.id}`,
+      lastModified: now,
+      changeFrequency: "weekly" as const,
+      priority: 0.85,
+    })),
+  ];
+
   // Dynamic story pages — API caps per_page at 100, so we paginate
   try {
     const allStories: { id: string }[] = [];
@@ -71,10 +88,10 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "monthly" as const,
       priority: 0.6,
     }));
-    return [...staticPages, ...categoryPages, ...storyPages];
+    return [...staticPages, ...categoryPages, ...seriesPages, ...storyPages];
   } catch {
-    // API unavailable — return static + category pages only
+    // API unavailable — return static + category + series pages only
   }
 
-  return [...staticPages, ...categoryPages];
+  return [...staticPages, ...categoryPages, ...seriesPages];
 }

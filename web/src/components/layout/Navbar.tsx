@@ -17,6 +17,7 @@ import { Menu, Heart, User, LogOut, BookOpen } from "lucide-react";
 
 const navLinks = [
   { href: "/library", label: "Story Library" },
+  { href: "/series", label: "Story Series" },
   { href: "/create", label: "Create a Story" },
 ];
 

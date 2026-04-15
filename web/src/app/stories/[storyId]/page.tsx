@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { StoryReader } from "@/components/reader/StoryReader";
 import { getStory } from "@/lib/api";
 import { API_URL } from "@/lib/constants";
+import { findSeriesContainingStory } from "@/lib/series";
 
 const SITE_URL = "https://www.thestorymama.club";
 
@@ -134,7 +135,33 @@ export default async function StoryPage({ params }: StoryPageProps) {
       />
 
       {/* Client-side reader (primary UX) */}
-      <StoryReader story={story} />
+      <StoryReader
+        story={story}
+        seriesNav={(() => {
+          const found = findSeriesContainingStory(storyId);
+          if (!found) return undefined;
+          const { series, episodeIndex } = found;
+          const ep = series.episodes[episodeIndex];
+          const prev = episodeIndex > 0 ? series.episodes[episodeIndex - 1] : undefined;
+          const next =
+            episodeIndex < series.episodes.length - 1
+              ? series.episodes[episodeIndex + 1]
+              : undefined;
+          return {
+            seriesId: series.id,
+            seriesTitle: series.title,
+            episodeCode: ep.code,
+            episodeIndex,
+            totalEpisodes: series.episodes.length,
+            prev: prev
+              ? { storyId: prev.storyId, title: prev.title, code: prev.code }
+              : undefined,
+            next: next
+              ? { storyId: next.storyId, title: next.title, code: next.code }
+              : undefined,
+          };
+        })()}
+      />
 
       {/* SEO: full story transcript — visible to crawlers, hidden from users */}
       <article className="sr-only" aria-hidden="true">
