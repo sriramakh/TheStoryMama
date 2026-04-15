@@ -56,11 +56,11 @@ export default function SeriesListPage() {
                 className="group rounded-2xl overflow-hidden bg-white border border-border/40 shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all"
               >
                 {cover && (
-                  <div className="h-56 overflow-hidden bg-[var(--color-pastel-cream)]">
+                  <div className="aspect-[2/3] overflow-hidden bg-[var(--color-pastel-cream)]">
                     <img
                       src={cover}
                       alt={`${s.title} — series cover`}
-                      className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-500"
+                      className="h-full w-full object-cover object-top group-hover:scale-105 transition-transform duration-500"
                       loading="lazy"
                     />
                   </div>
