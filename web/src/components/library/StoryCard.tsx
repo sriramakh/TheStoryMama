@@ -14,16 +14,16 @@ export function StoryCard({ story }: { story: Story }) {
     <Link href={`/stories/${story.id}`}>
       <Card className="group cursor-pointer border-0 shadow-sm hover:shadow-lg transition-all duration-300 hover:-translate-y-1 overflow-hidden h-full">
         {coverUrl ? (
-          <div className="h-52 overflow-hidden bg-[var(--color-pastel-cream)]">
+          <div className="aspect-[5/4] bg-[var(--color-pastel-cream)] flex items-center justify-center">
             <img
               src={coverUrl}
               alt={`Cover image for ${story.title}${story.moral ? ` — ${story.moral}` : ", a free children's bedtime story"}`}
-              className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-500"
+              className="max-h-full max-w-full object-contain group-hover:scale-[1.03] transition-transform duration-500"
               loading="lazy"
             />
           </div>
         ) : (
-          <div className="bg-[var(--color-pastel-cream)] h-52 flex items-center justify-center">
+          <div className="bg-[var(--color-pastel-cream)] aspect-[5/4] flex items-center justify-center">
             <BookOpen className="h-14 w-14 text-[var(--color-warm-brown)]/20 group-hover:scale-110 transition-transform" />
           </div>
         )}
