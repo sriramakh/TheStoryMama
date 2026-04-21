@@ -6,6 +6,7 @@ import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { BookOpen, Sparkles } from "lucide-react";
 import Link from "next/link";
+import { getJobStatus } from "@/lib/api";
 
 const STATUS_MESSAGES: Record<string, string> = {
   queued: "Getting everything ready...",
@@ -21,33 +22,36 @@ const STATUS_MESSAGES: Record<string, string> = {
 export function GenerationProgress({ jobId }: { jobId: string }) {
   const [status, setStatus] = useState("queued");
   const [progress, setProgress] = useState(0);
+  const [message, setMessage] = useState<string | null>(null);
   const [storyId, setStoryId] = useState<string | null>(null);
 
-  // TODO: Replace with actual API polling via useGenerationStatus hook
   useEffect(() => {
-    // Simulate progress for demo
-    const stages = [
-      { status: "generating_story", progress: 10, delay: 1000 },
-      { status: "generating_story", progress: 15, delay: 2000 },
-      { status: "generating_images", progress: 30, delay: 3000 },
-      { status: "generating_images", progress: 50, delay: 5000 },
-      { status: "generating_images", progress: 70, delay: 7000 },
-      { status: "overlaying_text", progress: 80, delay: 8000 },
-      { status: "compiling_pdf", progress: 90, delay: 9000 },
-      { status: "completed", progress: 100, delay: 10000 },
-    ];
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
 
-    const timers = stages.map((stage) =>
-      setTimeout(() => {
-        setStatus(stage.status);
-        setProgress(stage.progress);
-        if (stage.status === "completed") {
-          setStoryId("demo-story");
+    async function tick() {
+      try {
+        const s = await getJobStatus(jobId);
+        if (cancelled) return;
+        setStatus(s.status);
+        setProgress(s.progress ?? 0);
+        setMessage(s.message ?? null);
+        if (s.status === "completed" && s.story_id) {
+          setStoryId(s.story_id);
+          return; // stop polling
         }
-      }, stage.delay)
-    );
+        if (s.status === "failed") return;
+        timer = setTimeout(tick, 3000);
+      } catch {
+        if (!cancelled) timer = setTimeout(tick, 5000);
+      }
+    }
 
-    return () => timers.forEach(clearTimeout);
+    tick();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [jobId]);
 
   const isComplete = status === "completed";
@@ -71,7 +75,7 @@ export function GenerationProgress({ jobId }: { jobId: string }) {
 
         {/* Status message */}
         <h3 className="text-xl font-bold text-[var(--color-warm-brown)] mb-2">
-          {STATUS_MESSAGES[status] || "Working on your story..."}
+          {message || STATUS_MESSAGES[status] || "Working on your story..."}
         </h3>
 
         {!isComplete && !isFailed && (
@@ -115,8 +119,7 @@ export function GenerationProgress({ jobId }: { jobId: string }) {
         {isFailed && (
           <div className="mt-6">
             <p className="text-sm text-destructive mb-4">
-              We couldn&apos;t generate your story. Your credit has been
-              refunded.
+              {message || "We couldn't generate your story. Your credit has been refunded."}
             </p>
             <Button
               variant="outline"

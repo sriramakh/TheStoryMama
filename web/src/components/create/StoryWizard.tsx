@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useSession } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -14,11 +15,17 @@ import {
   Palette,
   Settings,
   Check,
+  Users,
 } from "lucide-react";
 import { GenerationProgress } from "./GenerationProgress";
+import { AvatarManager } from "@/components/avatars/AvatarManager";
+import { generateStory, listAvatars, type Avatar } from "@/lib/api";
+// Backend auth is handled server-side by Next.js proxy routes under
+// /api/stories/* and /api/avatars/*. The session is used only to gate the UI.
 
 const STEPS = [
   { label: "Describe", icon: Wand2 },
+  { label: "Characters", icon: Users },
   { label: "Art Style", icon: Palette },
   { label: "Settings", icon: Settings },
   { label: "Review", icon: Check },
@@ -38,31 +45,72 @@ const styleColors = [
 ];
 
 export function StoryWizard() {
+  const { data: session } = useSession();
+  const signedIn = !!session?.user?.email;
+
   const [step, setStep] = useState(0);
   const [description, setDescription] = useState("");
-  const [selectedStyle, setSelectedStyle] = useState("pixar_3d");
+  const [selectedAvatarIds, setSelectedAvatarIds] = useState<string[]>([]);
+  const [availableAvatars, setAvailableAvatars] = useState<Avatar[]>([]);
+  const [selectedStyle, setSelectedStyle] = useState("animation_movie");
   const [sceneCount, setSceneCount] = useState([12]);
   const [jobId, setJobId] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Pre-load avatars so we know if user has any (affects copy on the Characters step)
+  useEffect(() => {
+    if (!signedIn) return;
+    listAvatars()
+      .then((d) => setAvailableAvatars(d.avatars))
+      .catch(() => {});
+  }, [signedIn]);
+
+  function toggleAvatar(id: string) {
+    setSelectedAvatarIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  }
 
   async function handleGenerate() {
-    // TODO: Call API with auth token
-    // For now, show the progress component
-    setJobId("demo-job-id");
+    if (!signedIn) {
+      setError("Please sign in first.");
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      const result = await generateStory({
+        description: description || undefined,
+        num_scenes: sceneCount[0],
+        animation_style: selectedStyle,
+        avatar_ids:
+          selectedAvatarIds.length > 0 ? selectedAvatarIds : undefined,
+      });
+      setJobId(result.job_id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to start generation");
+      setSubmitting(false);
+    }
   }
 
   if (jobId) {
     return <GenerationProgress jobId={jobId} />;
   }
 
+  const selectedAvatars = availableAvatars.filter((a) =>
+    selectedAvatarIds.includes(a.id)
+  );
+
   return (
     <div>
       {/* Step indicator */}
-      <div className="flex items-center justify-center gap-2 mb-8">
+      <div className="flex items-center justify-center gap-1 sm:gap-2 mb-8 flex-wrap">
         {STEPS.map((s, i) => (
           <div key={s.label} className="flex items-center">
             <button
               onClick={() => i < step && setStep(i)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full text-xs sm:text-sm font-medium transition-colors ${
                 i === step
                   ? "bg-[var(--color-pastel-pink)] text-[var(--color-warm-brown)]"
                   : i < step
@@ -74,7 +122,7 @@ export function StoryWizard() {
               <span className="hidden sm:inline">{s.label}</span>
             </button>
             {i < STEPS.length - 1 && (
-              <ChevronRight className="h-4 w-4 text-muted-foreground mx-1" />
+              <ChevronRight className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground mx-0.5 sm:mx-1" />
             )}
           </div>
         ))}
@@ -82,7 +130,7 @@ export function StoryWizard() {
 
       <Card className="border-0 shadow-sm">
         <CardContent className="p-6 sm:p-8">
-          {/* Step 1: Description */}
+          {/* Step 0: Description */}
           {step === 0 && (
             <div>
               <h2 className="text-xl font-semibold text-[var(--color-warm-brown)] mb-4">
@@ -110,9 +158,9 @@ export function StoryWizard() {
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {[
-                    "A bunny who finds a magical garden",
-                    "Two kittens on a rainy day adventure",
-                    "A little owl learning to be brave at night",
+                    "A magical garden adventure with grandma",
+                    "Best friends find a hidden treasure at the park",
+                    "A rainy day fort that becomes a spaceship",
                   ].map((prompt) => (
                     <button
                       key={prompt}
@@ -127,8 +175,27 @@ export function StoryWizard() {
             </div>
           )}
 
-          {/* Step 2: Art Style */}
+          {/* Step 1: Characters (Avatars) */}
           {step === 1 && (
+            <div>
+              <h2 className="text-xl font-semibold text-[var(--color-warm-brown)] mb-2">
+                Star your loved ones
+              </h2>
+              <p className="text-sm text-muted-foreground mb-6">
+                Pick which avatars should appear in this story. Or skip — we&apos;ll
+                invent characters for you.
+              </p>
+              <AvatarManager
+                selectable
+                selectedIds={selectedAvatarIds}
+                onSelect={toggleAvatar}
+                onAvatarsChange={setAvailableAvatars}
+              />
+            </div>
+          )}
+
+          {/* Step 2: Art Style */}
+          {step === 2 && (
             <div>
               <h2 className="text-xl font-semibold text-[var(--color-warm-brown)] mb-4">
                 Choose an art style
@@ -155,7 +222,7 @@ export function StoryWizard() {
           )}
 
           {/* Step 3: Settings */}
-          {step === 2 && (
+          {step === 3 && (
             <div>
               <h2 className="text-xl font-semibold text-[var(--color-warm-brown)] mb-6">
                 Story settings
@@ -167,7 +234,9 @@ export function StoryWizard() {
                 <div className="mt-3">
                   <Slider
                     value={sceneCount}
-                    onValueChange={(value) => setSceneCount(Array.isArray(value) ? value : [value])}
+                    onValueChange={(value) =>
+                      setSceneCount(Array.isArray(value) ? value : [value])
+                    }
                     min={10}
                     max={15}
                     step={1}
@@ -186,7 +255,7 @@ export function StoryWizard() {
           )}
 
           {/* Step 4: Review */}
-          {step === 3 && (
+          {step === 4 && (
             <div>
               <h2 className="text-xl font-semibold text-[var(--color-warm-brown)] mb-6">
                 Review your story
@@ -200,16 +269,40 @@ export function StoryWizard() {
                     {description || "Surprise me with a random story!"}
                   </p>
                 </div>
+
+                {selectedAvatars.length > 0 && (
+                  <div className="bg-[var(--color-pastel-cream)] rounded-xl p-4">
+                    <p className="text-xs font-medium text-muted-foreground mb-2">
+                      Characters
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedAvatars.map((a) => (
+                        <div
+                          key={a.id}
+                          className="flex items-center gap-2 bg-white rounded-full pl-1 pr-3 py-1"
+                        >
+                          <img
+                            src={a.image_url}
+                            alt={a.name}
+                            className="h-7 w-7 rounded-full object-cover"
+                          />
+                          <span className="text-xs font-medium text-[var(--color-warm-brown)]">
+                            {a.name}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex gap-4">
                   <div className="bg-[var(--color-pastel-cream)] rounded-xl p-4 flex-1">
                     <p className="text-xs font-medium text-muted-foreground mb-1">
                       Art Style
                     </p>
                     <p className="text-sm text-[var(--color-warm-brown)]">
-                      {ANIMATION_STYLES.find((s) => s.id === selectedStyle)
-                        ?.preview}{" "}
-                      {ANIMATION_STYLES.find((s) => s.id === selectedStyle)
-                        ?.name}
+                      {ANIMATION_STYLES.find((s) => s.id === selectedStyle)?.preview}{" "}
+                      {ANIMATION_STYLES.find((s) => s.id === selectedStyle)?.name}
                     </p>
                   </div>
                   <div className="bg-[var(--color-pastel-cream)] rounded-xl p-4 flex-1">
@@ -221,11 +314,20 @@ export function StoryWizard() {
                     </p>
                   </div>
                 </div>
+
                 <div className="bg-[var(--color-pastel-yellow)]/50 rounded-xl p-4 text-center">
                   <p className="text-sm text-[var(--color-warm-brown)]">
                     This will use <strong>1 story credit</strong>
+                    {selectedAvatars.length > 0 &&
+                      ` · Featuring ${selectedAvatars.length} of your avatars`}
                   </p>
                 </div>
+
+                {error && (
+                  <div className="bg-red-50 border border-red-200 text-red-700 text-sm p-3 rounded-lg">
+                    {error}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -237,6 +339,7 @@ export function StoryWizard() {
                 variant="outline"
                 onClick={() => setStep(step - 1)}
                 className="rounded-xl gap-1"
+                disabled={submitting}
               >
                 <ChevronLeft className="h-4 w-4" />
                 Back
@@ -245,7 +348,7 @@ export function StoryWizard() {
               <div />
             )}
 
-            {step < 3 ? (
+            {step < STEPS.length - 1 ? (
               <Button
                 onClick={() => setStep(step + 1)}
                 className="rounded-xl gap-1 bg-[var(--color-pastel-pink)] text-[var(--color-warm-brown)] hover:bg-[var(--color-pastel-rose)]"
@@ -256,10 +359,11 @@ export function StoryWizard() {
             ) : (
               <Button
                 onClick={handleGenerate}
+                disabled={submitting}
                 className="rounded-xl gap-2 bg-[var(--color-pastel-pink)] text-[var(--color-warm-brown)] hover:bg-[var(--color-pastel-rose)] px-8"
               >
                 <Sparkles className="h-4 w-4" />
-                Create My Story
+                {submitting ? "Starting..." : "Create My Story"}
               </Button>
             )}
           </div>

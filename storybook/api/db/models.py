@@ -32,6 +32,9 @@ class User(Base):
     avatar_url = Column(String(500), nullable=True)
     provider = Column(String(50), default="credentials")  # credentials, google
     provider_id = Column(String(255), nullable=True)
+    # Avatar quota: how many character avatars the user can create.
+    # Free = 0, Paid subscriber = 3, +5 per $10 add-on pack.
+    avatar_quota = Column(Integer, default=0, nullable=False)
     created_at = Column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -122,6 +125,24 @@ class Credit(Base):
     # Relationships
     user = relationship("User", back_populates="credits")
     order = relationship("Order", back_populates="credits")
+
+
+class Avatar(Base):
+    """User-owned character avatar (used as portrait reference for story image generation)."""
+    __tablename__ = "avatars"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name = Column(String(100), nullable=False)
+    type = Column(String(100), nullable=False)  # e.g. "boy", "girl", "father", "grandmother"
+    description = Column(Text, nullable=True)  # extracted visual sheet for prompts
+    image_path = Column(String(500), nullable=False)  # avatar PNG path on disk
+    source_path = Column(String(500), nullable=True)  # original uploaded photo path
+    created_at = Column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
 
 
 class GenerationJob(Base):

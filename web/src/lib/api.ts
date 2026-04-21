@@ -61,29 +61,93 @@ export function getStoryPdfUrl(storyId: string): string {
   return `${API_URL}/api/v1/stories/${storyId}/pdf`;
 }
 
-// Authenticated endpoints
-export async function generateStory(
-  data: {
-    description?: string;
-    num_scenes?: number;
-    animation_style?: string;
-  },
-  token: string
-): Promise<JobStatus> {
-  return fetchAPI<JobStatus>("/api/v1/stories/generate", {
+// Authenticated endpoints — routed through Next.js proxy routes that
+// handle session → backend JWT minting. No client-side token required.
+async function proxyFetch<T>(
+  path: string,
+  options?: RequestInit
+): Promise<T> {
+  const res = await fetch(path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers,
+    },
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(error.detail || `API error: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function generateStory(data: {
+  description?: string;
+  num_scenes?: number;
+  animation_style?: string;
+  avatar_ids?: string[];
+}): Promise<JobStatus> {
+  return proxyFetch<JobStatus>("/api/stories/generate", {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
     body: JSON.stringify(data),
   });
 }
 
-export async function getJobStatus(
-  jobId: string,
-  token: string
-): Promise<JobStatus> {
-  return fetchAPI<JobStatus>(`/api/v1/stories/generate/${jobId}`, {
-    headers: { Authorization: `Bearer ${token}` },
+// Avatar endpoints
+export interface Avatar {
+  id: string;
+  name: string;
+  type: string;
+  description: string | null;
+  image_url: string;
+  created_at: string;
+}
+
+export interface AvatarListResponse {
+  avatars: Avatar[];
+  quota: number;
+  used: number;
+  can_create: boolean;
+}
+
+export async function listAvatars(): Promise<AvatarListResponse> {
+  return proxyFetch<AvatarListResponse>("/api/avatars");
+}
+
+export async function createAvatar(data: {
+  name: string;
+  type: string;
+  photo: File;
+}): Promise<Avatar> {
+  const form = new FormData();
+  form.append("name", data.name);
+  form.append("type", data.type);
+  form.append("photo", data.photo);
+
+  const res = await fetch("/api/avatars/create", {
+    method: "POST",
+    body: form,
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || `Avatar creation failed (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function deleteAvatar(avatarId: string): Promise<void> {
+  const res = await fetch(`/api/avatars/${avatarId}`, { method: "DELETE" });
+  if (!res.ok) {
+    throw new Error(`Failed to delete avatar (${res.status})`);
+  }
+}
+
+export function getAvatarImageUrl(avatarId: string): string {
+  return `/api/avatars/${avatarId}/image`;
+}
+
+export async function getJobStatus(jobId: string): Promise<JobStatus> {
+  return proxyFetch<JobStatus>(`/api/stories/generate/${jobId}`);
 }
 
 export async function getUserProfile(token: string): Promise<User> {

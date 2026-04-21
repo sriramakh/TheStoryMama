@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
 from api.routers import health, stories
-from api.routers import library, auth, payments, users
+from api.routers import library, auth, payments, users, avatars
 from api.db.engine import init_db
 
 
@@ -49,6 +49,7 @@ app.include_router(library.router)
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(payments.router)
+app.include_router(avatars.router)
 
 
 @app.get("/", include_in_schema=False)

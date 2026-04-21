@@ -8,6 +8,7 @@ import {
   Plus,
   Sparkles,
   Download,
+  Users,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -94,6 +95,44 @@ export default function DashboardPage() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Quick links */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
+          <Link href="/dashboard/avatars">
+            <Card className="border-0 shadow-sm hover:shadow-md transition-all cursor-pointer hover:-translate-y-0.5">
+              <CardContent className="p-5 flex items-center gap-4">
+                <div className="h-12 w-12 rounded-xl bg-[var(--color-pastel-lavender)] flex items-center justify-center flex-shrink-0">
+                  <Users className="h-6 w-6 text-purple-600" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-semibold text-[var(--color-warm-brown)]">
+                    My Avatars
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    Turn photos of loved ones into story characters
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
+          <Link href="/create">
+            <Card className="border-0 shadow-sm hover:shadow-md transition-all cursor-pointer hover:-translate-y-0.5">
+              <CardContent className="p-5 flex items-center gap-4">
+                <div className="h-12 w-12 rounded-xl bg-[var(--color-pastel-pink)] flex items-center justify-center flex-shrink-0">
+                  <Sparkles className="h-6 w-6 text-[var(--color-warm-brown)]" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-semibold text-[var(--color-warm-brown)]">
+                    Create a New Story
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    Personalized illustrated bedtime stories
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
+        </div>
 
         {/* My stories */}
         <div>

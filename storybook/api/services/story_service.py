@@ -48,6 +48,8 @@ class StoryService:
         num_scenes: int,
         animation_style: str | None,
         age_group: str | None,
+        avatars: list[dict] | None = None,
+        user_id: str | None = None,
     ) -> str:
         job_id = str(uuid.uuid4())
         self.jobs[job_id] = {
@@ -60,7 +62,7 @@ class StoryService:
 
         thread = threading.Thread(
             target=self._run_pipeline,
-            args=(job_id, description, num_scenes, animation_style),
+            args=(job_id, description, num_scenes, animation_style, avatars or [], user_id),
             daemon=True,
         )
         thread.start()
@@ -79,6 +81,8 @@ class StoryService:
         description: str | None,
         num_scenes: int,
         animation_style: str | None,
+        avatars: list[dict] | None = None,
+        user_id: str | None = None,
     ):
         try:
             # Phase 1: Generate story text
@@ -93,13 +97,39 @@ class StoryService:
             registry = CharacterRegistry()
             character_prompt = registry.get_prompt_text()
 
+            # Build avatar character prompt: if user supplied avatars, instruct
+            # the story generator to use those characters by name.
+            avatar_character_prompt = None
+            if avatars:
+                lines = []
+                for a in avatars:
+                    line = f"- {a['name']} ({a['type']}): {a.get('description', '')}"
+                    lines.append(line)
+                avatar_character_prompt = (
+                    "USER-PROVIDED CHARACTERS (use these EXACT names and types in the story; "
+                    "every scene must feature one or more of them by name):\n"
+                    + "\n".join(lines)
+                )
+
             generator = StoryGenerator()
             story = generator.generate_story(
                 num_scenes=num_scenes,
                 description=description,
                 art_style_hint=art_style_hint,
-                character_names_prompt=character_prompt,
+                character_names_prompt=avatar_character_prompt or character_prompt,
             )
+
+            # Override the LLM-generated characters with the user's avatars
+            # so the image generator uses the avatar portraits as references.
+            if avatars:
+                story["characters"] = [
+                    {
+                        "name": a["name"],
+                        "type": a["type"],
+                        "description": a.get("description", ""),
+                    }
+                    for a in avatars
+                ]
 
             self._update_job(job_id, progress=0.15, message="Story text generated")
 
@@ -108,6 +138,20 @@ class StoryService:
             folder_path = create_story_folder(self.stories_dir, serial, story["title"])
             save_story_json(story, folder_path)
             story_id = os.path.basename(folder_path)
+
+            # Copy avatar portraits into the story folder so the image generator
+            # finds them via _portrait_paths (mirrors Caleb series flow).
+            avatar_portrait_paths = {}
+            if avatars:
+                portraits_dir = os.path.join(folder_path, "portraits")
+                os.makedirs(portraits_dir, exist_ok=True)
+                import shutil
+                for a in avatars:
+                    safe = a["name"].lower().replace(" ", "_")
+                    dst = os.path.join(portraits_dir, f"{safe}.png")
+                    if os.path.exists(a["portrait_path"]):
+                        shutil.copy2(a["portrait_path"], dst)
+                        avatar_portrait_paths[a["name"]] = dst
 
             # Phase 2: Generate images
             self._update_job(
@@ -132,12 +176,23 @@ class StoryService:
                     message=status_labels.get(status, f"Processing scene {scene_num}/{total}..."),
                 )
 
-            img_gen = ImageGenerator(animation_style=style_config)
-            raw_image_paths = img_gen.generate_all_images(
-                story=story,
-                output_dir=folder_path,
-                progress_callback=image_progress_callback,
-            )
+            # Use grok-image for user-facing /create flow — supports portrait
+            # references via images.edit() and is cheaper than gpt-image.
+            old_provider = Config.IMAGE_PROVIDER
+            Config.IMAGE_PROVIDER = "grok-image"
+            try:
+                img_gen = ImageGenerator(animation_style=style_config)
+                # Pre-populate portrait paths from user avatars (skips portrait
+                # generation in Phase 0 — they're already created from user uploads).
+                if avatar_portrait_paths:
+                    img_gen._portrait_paths = avatar_portrait_paths
+                raw_image_paths = img_gen.generate_all_images(
+                    story=story,
+                    output_dir=folder_path,
+                    progress_callback=image_progress_callback,
+                )
+            finally:
+                Config.IMAGE_PROVIDER = old_provider
 
             # Phase 3: Text overlay
             self._update_job(

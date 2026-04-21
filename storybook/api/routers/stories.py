@@ -1,5 +1,6 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
+from sqlalchemy.orm import Session
 
 from api.schemas.story import (
     StoryGenerateRequest,
@@ -12,6 +13,9 @@ from api.schemas.story import (
 )
 from api.services.story_service import story_service
 from api.services.safety_filter import safety_filter
+from api.middleware.auth import optional_auth, require_auth
+from api.db.engine import get_db
+from api.db.models import Avatar, User
 
 import sys
 import os
@@ -26,7 +30,11 @@ router = APIRouter(prefix="/api/v1")
 
 
 @router.post("/stories/generate", response_model=JobStatusResponse)
-async def generate_story(request: StoryGenerateRequest):
+async def generate_story(
+    request: StoryGenerateRequest,
+    user: User = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
     # Safety check
     if request.description:
         is_safe, reason = safety_filter.is_safe(request.description)
@@ -40,11 +48,33 @@ async def generate_story(request: StoryGenerateRequest):
             detail=f"Invalid animation style. Available: {list(Config.ANIMATION_STYLES.keys())}",
         )
 
+    # Resolve avatar IDs to character data (name/type/description/portrait_path).
+    # Each avatar becomes a story character; its portrait is passed to the image
+    # generator as a Grok images.edit() reference (same flow as Caleb series).
+    avatars_data = []
+    if request.avatar_ids:
+        avs = (
+            db.query(Avatar)
+            .filter(Avatar.id.in_(request.avatar_ids), Avatar.user_id == user.id)
+            .all()
+        )
+        if len(avs) != len(request.avatar_ids):
+            raise HTTPException(400, "One or more avatar_ids are invalid or not yours")
+        for a in avs:
+            avatars_data.append({
+                "name": a.name,
+                "type": a.type,
+                "description": a.description or "",
+                "portrait_path": a.image_path,
+            })
+
     job_id = story_service.start_generation(
         description=request.description,
         num_scenes=request.num_scenes,
         animation_style=request.animation_style,
         age_group=request.age_group,
+        avatars=avatars_data,
+        user_id=str(user.id),
     )
 
     return JobStatusResponse(

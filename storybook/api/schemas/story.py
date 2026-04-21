@@ -18,6 +18,10 @@ class StoryGenerateRequest(BaseModel):
     num_scenes: int = Field(12, ge=10, le=15, description="Number of scenes")
     animation_style: Optional[str] = Field(None, description="Animation style key")
     age_group: Optional[str] = Field("2-4", description="Target age group")
+    avatar_ids: Optional[list[str]] = Field(
+        None,
+        description="User avatar IDs to use as story characters (their portraits become image references)",
+    )
 
 
 class JobStatusResponse(BaseModel):
