@@ -44,6 +44,11 @@ export const SERIES: Series[] = [
       { code: "S01E13", storyId: "217_Dad_Pancake_Disaster", title: "Dad's Pancake Disaster", synopsis: "Dad's fancy shaped pancakes all go hilariously wrong but the kids love naming each blobby creation." },
       { code: "S01E14", storyId: "218_The_Playground_Challenge", title: "The Playground Challenge", synopsis: "Caleb fails the monkey bars four times before finally making it across on the fifth try." },
       { code: "S01E15", storyId: "219_Nana_Joy_Baking_Day", title: "Nana Joy's Baking Day", synopsis: "Shells in eggs, flour explosions, and a spoon-licking puppy still produce amazing cookies and family memories." },
+      { code: "S01E16", storyId: "220_Calebs_Adventures_The_Brave_Backyard_Campout", title: "The Brave Backyard Campout", synopsis: "Jack sets up a backyard tent for Caleb and Lily's first camping trip with marshmallows, fireflies, and ukulele songs." },
+      { code: "S01E17", storyId: "221_Calebs_Kite-Tangling_Tumble", title: "Caleb's Kite-Tangling Tumble", synopsis: "Kites nose-dive, get stuck in trees, and tangle together — but Nana Joy's simple newspaper kite flies the highest." },
+      { code: "S01E18", storyId: "222_Calebs_Wobbly_Costume_Parade", title: "Caleb's Wobbly Costume Parade", synopsis: "A neighborhood costume parade where Caleb's cardboard dinosaur keeps falling apart and everyone wins Best Costume." },
+      { code: "S01E19", storyId: "223_Calebs_Shake_Paw_Surprise_with_Bubbles", title: "Caleb's Shake Paw Surprise", synopsis: "A whole day of failed attempts to teach Bubbles to shake hands ends with one perfect paw — and a startled dash under the couch." },
+      { code: "S01E20", storyId: "224_Calebs_Sparkly_Thank-You_Party", title: "Caleb's Sparkly Thank-You Party", synopsis: "Season finale — Caleb throws a thank-you party for everyone who made his year special, with messy cake, glitter cards, and backyard dancing." },
     ],
   },
 ];

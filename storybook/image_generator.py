@@ -998,12 +998,18 @@ RULES:
             if self._character_visual_sheet:
                 print(f"   Visual sheet ready ({len(self._character_visual_sheet)} chars)")
 
-        # Inject visual sheet into prompt
+        # Inject visual sheet into prompt ONLY for scene 0 — for scenes 1+,
+        # _build_gpt_image_prompt already includes the sheet, so adding it here
+        # would double it and exceed Grok's 8000-char prompt limit.
         sheet_section = ""
-        if self._character_visual_sheet:
+        if scene_index == 0 and self._character_visual_sheet:
             sheet_section = f"\nCHARACTER VISUAL REFERENCE (match EXACTLY):\n{self._character_visual_sheet}\n"
 
         safe_prompt = f"Illustrated children's bedtime storybook scene for toddlers aged 2-4.\n{sheet_section}\n{prompt}"
+
+        # Grok has an 8000 char prompt limit — truncate if needed
+        if len(safe_prompt) > 7900:
+            safe_prompt = safe_prompt[:7900]
 
         for attempt in range(retry_count):
             try:
@@ -1265,18 +1271,28 @@ Respond ONLY with JSON: {{"confidence": 0.85, "reason": "short note"}}"""
         image_paths = []
         total = len(story["scenes"])
 
+        # Preserve pre-set portraits (user-uploaded avatars from /create flow).
+        # If portraits were set before calling this method, skip Phase 0 generation.
+        preset_portraits = dict(self._portrait_paths) if self._portrait_paths else None
+
         # Reset per-story state (critical for batch mode — prevent cross-story bleeding)
         self._reference_image_b64 = None
         self._reference_image_path = None
         self._recent_scene_paths = []
         self._character_visual_sheet = None
         self._prior_scene_images = []
-        self._portrait_paths = {}
+        self._portrait_paths = preset_portraits or {}
 
         # ── Phase 0: Generate character portraits (for gpt-image and grok-image providers) ──
-        if self.image_provider in ("gpt-image", "grok-image") and story.get("characters"):
+        if (
+            not preset_portraits
+            and self.image_provider in ("gpt-image", "grok-image")
+            and story.get("characters")
+        ):
             print(f"  Generating {len(story['characters'])} character portraits...")
             self.generate_character_portraits(story, output_dir, progress_callback)
+        elif preset_portraits:
+            print(f"  Using {len(preset_portraits)} pre-supplied avatar portraits — skipping Phase 0")
 
         # ── Phase 1: Generate all images ──
         for i, scene in enumerate(story["scenes"]):
