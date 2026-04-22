@@ -27,7 +27,7 @@ export const SERIES: Series[] = [
     title: "Caleb's Adventures",
     tagline: "A warm, funny bedtime series starring Caleb, his sister Lily, puppy Bubbles, and friends.",
     description:
-      "Follow Caleb — a curious 3-year-old explorer — through 20 cozy, beautifully illustrated adventures with his family and best friends. From backyard treasure hunts to messy pancake breakfasts, every episode is a gentle, read-aloud-friendly story designed for toddlers aged 2–5.",
+      "Follow Caleb — a curious 3-year-old explorer — through 40 cozy, beautifully illustrated adventures with his family and best friends. From backyard treasure hunts to messy pancake breakfasts, every episode is a gentle, read-aloud-friendly story designed for toddlers aged 2–5.",
     episodes: [
       { code: "S01E01", storyId: "203_The_Backyard_Treasure_Hunt", title: "The Backyard Treasure Hunt", synopsis: "Dad hides a treasure map and the kids follow clues while Bubbles digs up everything except the treasure." },
       { code: "S01E02", storyId: "204_Bubbles_First_Bath", title: "Bubbles' First Bath", synopsis: "Muddy Bubbles escapes bath time leading to a hilarious house chase that ends in a bubble-filled party." },
@@ -49,6 +49,11 @@ export const SERIES: Series[] = [
       { code: "S01E18", storyId: "222_Calebs_Wobbly_Costume_Parade", title: "Caleb's Wobbly Costume Parade", synopsis: "A neighborhood costume parade where Caleb's cardboard dinosaur keeps falling apart and everyone wins Best Costume." },
       { code: "S01E19", storyId: "223_Calebs_Shake_Paw_Surprise_with_Bubbles", title: "Caleb's Shake Paw Surprise", synopsis: "A whole day of failed attempts to teach Bubbles to shake hands ends with one perfect paw — and a startled dash under the couch." },
       { code: "S01E20", storyId: "224_Calebs_Sparkly_Thank-You_Party", title: "Caleb's Sparkly Thank-You Party", synopsis: "Season finale — Caleb throws a thank-you party for everyone who made his year special, with messy cake, glitter cards, and backyard dancing." },
+      { code: "S02E01", storyId: "225_Calebs_Brave_Preschool_Day", title: "Caleb's Brave Preschool Day", synopsis: "Caleb starts preschool and is too nervous to let go of Sarah's hand — until he discovers all his friends are in his class." },
+      { code: "S02E02", storyId: "226_Calebs_First_Snowy_Surprise_Meet_Mr_Wobble", title: "Meet Mr. Wobble", synopsis: "The first snowfall turns the backyard into a winter wonderland — complete with a lopsided snowman, snow-eating puppy, and hot cocoa." },
+      { code: "S02E03", storyId: "227_Calebs_Adventures_Pip_the_Lost_Duckling", title: "Pip the Lost Duckling", synopsis: "Bubbles finds a lost duckling and the family embarks on a gentle mission to reunite it with its mama at the park pond." },
+      { code: "S02E04", storyId: "228_Calebs_Adventures_The_Mystery_of_Nana_Joys_Lost_Key", title: "Nana Joy's Mystery Box", synopsis: "A locked wooden box, a lost key, and a cottage-wide treasure hunt reveal hand-drawn pictures from Nana Joy's childhood." },
+      { code: "S02E05", storyId: "229_Caleb_and_Ravis_Epic_Bug_Safari", title: "Ravi's Bug Safari", synopsis: "Ravi and Caleb catalogue every bug in the backyard — until Bubbles accidentally destroys the ant highway and they rebuild it together." },
     ],
   },
 ];
