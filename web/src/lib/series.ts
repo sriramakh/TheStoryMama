@@ -54,6 +54,11 @@ export const SERIES: Series[] = [
       { code: "S02E03", storyId: "227_Calebs_Adventures_Pip_the_Lost_Duckling", title: "Pip the Lost Duckling", synopsis: "Bubbles finds a lost duckling and the family embarks on a gentle mission to reunite it with its mama at the park pond." },
       { code: "S02E04", storyId: "228_Calebs_Adventures_The_Mystery_of_Nana_Joys_Lost_Key", title: "Nana Joy's Mystery Box", synopsis: "A locked wooden box, a lost key, and a cottage-wide treasure hunt reveal hand-drawn pictures from Nana Joy's childhood." },
       { code: "S02E05", storyId: "229_Caleb_and_Ravis_Epic_Bug_Safari", title: "Ravi's Bug Safari", synopsis: "Ravi and Caleb catalogue every bug in the backyard — until Bubbles accidentally destroys the ant highway and they rebuild it together." },
+      { code: "S02E06", storyId: "230_Calebs_Adventures_The_Dragon_Egg_Mix-Up", title: "The Dragon Egg Mix-Up", synopsis: "Caleb's in charge of the shopping list at the farmer's market — dragon fruit becomes a dragon egg and his star keychain gets traded for honey." },
+      { code: "S02E07", storyId: "232_Calebs_Glitter_Wiggle_for_Sofia", title: "Sofia's Dance Recital", synopsis: "Sofia freezes on stage at her first recital until Caleb stands up and does a silly wiggle dance to make her laugh." },
+      { code: "S02E08", storyId: "233_Calebs_Adventures_Jacks_Wacky_Fix-It_Day", title: "Jack's Wacky Fix-It Day", synopsis: "Jack tries to fix everything in one day with Caleb as his assistant — spatulas instead of screwdrivers, and Sarah saves the day." },
+      { code: "S02E09", storyId: "234_Calebs_Adventures_The_Polka-Dot_Birdhouse_Surprise", title: "The Polka-Dot Birdhouse", synopsis: "Mila and Caleb build and paint a birdhouse — nothing comes all day, but a wren family moves in by morning." },
+      { code: "S02E10", storyId: "235_Calebs_Adventures_The_Super_Silly_Soccer_Showdown", title: "The Super Silly Soccer Showdown", synopsis: "Aiden teaches Caleb soccer with puppy goals counting double, falling down earning hugs, and a final score nobody can explain." },
     ],
   },
 ];
