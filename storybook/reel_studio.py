@@ -153,6 +153,32 @@ def generate_tts(story_id, voice):
     is_grok = voice.lower() in GROK_TTS_VOICES
     generated = 0
 
+    # Generate TTS for suspense opening hook (Scene 0) if present
+    if story.get("suspense_opening") and story.get("hook_text"):
+        tts_path = os.path.join(cache_dir, "scene_00.mp3")
+        if not os.path.exists(tts_path):
+            hook = story["hook_text"]
+            if is_grok:
+                tagged_text = _add_speech_tags(hook)
+                resp = http_requests.post(
+                    "https://api.x.ai/v1/tts",
+                    headers={"Authorization": f"Bearer {Config.GROK_API_KEY}", "Content-Type": "application/json"},
+                    json={"text": tagged_text, "voice_id": voice.capitalize(),
+                          "output_format": {"codec": "mp3", "sample_rate": 44100, "bit_rate": 128000}, "language": "en"},
+                    timeout=30,
+                )
+                resp.raise_for_status()
+                with open(tts_path, "wb") as f:
+                    f.write(resp.content)
+            else:
+                instructions = VOICE_INSTRUCTIONS[voice]
+                response = client.audio.speech.create(
+                    model="tts-1-hd", voice=voice, input=hook, instructions=instructions, response_format="mp3",
+                )
+                with open(tts_path, "wb") as f:
+                    f.write(response.content)
+            generated += 1
+
     for scene in story["scenes"]:
         sn = scene["scene_number"]
         tts_path = os.path.join(cache_dir, f"scene_{sn:02d}.mp3")
@@ -482,11 +508,22 @@ def _generate_reel_impl(req: ReelRequest, job_id: str):
         raise HTTPException(400, f"BGM not found: {req.bgm}")
 
     scenes = story["scenes"]
-    n = len(scenes)
     tr = 0.5
 
-    # Scene data
+    # Scene data — prepend Scene 0 (suspense cold-open) if present
     sdata = []
+
+    if story.get("suspense_opening") and story.get("hook_text"):
+        tp0 = os.path.join(tts_dir, "scene_00.mp3")
+        if os.path.exists(tp0):
+            dur0 = max(4.0, get_dur(tp0) / req.tts_tempo + 0.5)
+            # Scene 0 image: use the overlaid scene_00.jpg, fallback to suspense scene's image
+            ip0 = os.path.join(STORIES_DIR, req.story_id, "scene_00.jpg")
+            if not os.path.exists(ip0):
+                ss = story["suspense_scene"]
+                ip0 = os.path.join(STORIES_DIR, req.story_id, f"scene_{ss:02d}.jpg")
+            sdata.append({"sn": 0, "tts": tp0, "dur": dur0, "img": ip0})
+
     for sc in scenes:
         sn = sc["scene_number"]
         tp = os.path.join(tts_dir, f"scene_{sn:02d}.mp3")
@@ -497,6 +534,8 @@ def _generate_reel_impl(req: ReelRequest, job_id: str):
         if not os.path.exists(ip):
             ip = os.path.join(STORIES_DIR, req.story_id, f"scene_{sn:02d}_raw.png")
         sdata.append({"sn": sn, "tts": tp, "dur": dur, "img": ip})
+
+    n = len(sdata)
 
     # Prepare intro/outro
     intro_vid = None
@@ -1988,6 +2027,7 @@ class BuildSingleRequest(BaseModel):
     description: str | None = None
     num_scenes: int = 12
     scenes: list[dict] | None = None  # For manual: [{scene_number, text, image_description, background}]
+    suspense_opening: bool = False  # Enable cold-open suspense hook before scene 1
 
 
 class BuildBatchRequest(BaseModel):
@@ -2149,6 +2189,7 @@ def generate_story_text(req: BuildSingleRequest):
         art_style_hint=style["story_art_style"],
         existing_titles=existing_titles,
         existing_plots=existing_plots,
+        suspense_opening=req.suspense_opening,
     )
     story["animation_style"] = req.style
 
@@ -2296,6 +2337,7 @@ def _build_single(req: BuildSingleRequest, job_id: str):
             art_style_hint=style["story_art_style"],
             existing_titles=existing_titles,
             existing_plots=existing_plots,
+            suspense_opening=req.suspense_opening,
         )
         story["animation_style"] = style_key
 
@@ -2647,6 +2689,14 @@ textarea { min-height: 120px; resize: vertical; }
     <option value="15">15</option>
   </select>
 
+  <label style="margin-top:14px;">
+    <input type="checkbox" id="suspenseOpening" style="margin-right:6px; vertical-align:middle;">
+    <span style="font-weight:700; color:#654321;">Suspense Opening</span>
+    <span style="font-size:11px; color:#999; display:block; margin-left:22px; margin-top:2px;">
+      Starts with a dramatic cold-open hook from the middle of the story, then tells the full story from the beginning.
+    </span>
+  </label>
+
   <div style="margin-top:20px;">
     <button class="btn btn-primary" id="btnBuildSingle" onclick="startSingleBuild()">Generate Story</button>
   </div>
@@ -2928,7 +2978,7 @@ function startSingleBuild() {
   fetch('/api/build/generate-story', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({description: desc || null, num_scenes: scenes, style: selectedStyle, layout: selectedLayout, mode: buildMode, story_model: document.getElementById('storyModel').value}),
+    body: JSON.stringify({description: desc || null, num_scenes: scenes, style: selectedStyle, layout: selectedLayout, mode: buildMode, story_model: document.getElementById('storyModel').value, suspense_opening: document.getElementById('suspenseOpening').checked}),
   }).then(r => r.json()).then(data => {
     currentStory = data.story;
     if (data.story._duplicate_warning) {
@@ -2958,6 +3008,7 @@ function showSceneReview(story) {
       </div>
       <p style="font-size:12px; color:#8B7D6B; margin-top:4px;">Characters: ${story.characters.map(c => '<b>' + c.name + '</b> (' + c.type + ')').join(', ')}</p>
       ${story.moral ? '<p style="font-size:12px; color:#8B7D6B; margin-top:2px;">Moral: ' + story.moral + '</p>' : ''}
+      ${story.suspense_opening ? '<div style="margin-top:8px; padding:8px 12px; background:#FDE8E8; border-radius:8px; border-left:3px solid #E8829A;"><p style="font-size:11px; font-weight:700; color:#B44D5E; margin-bottom:2px;">Suspense Cold-Open (Scene 0):</p><p style="font-size:12px; color:#654321; font-style:italic;">"' + story.hook_text + '"</p><p style="font-size:10px; color:#999; margin-top:2px;">Uses image from Scene ' + story.suspense_scene + '</p></div>' : ''}
     </div>` +
     story.scenes.map(s => `
     <div class="scene-card" id="sceneCard-${s.scene_number}">
@@ -3017,7 +3068,7 @@ function regenerateStory() {
   fetch('/api/build/generate-story', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({description: desc || null, num_scenes: scenes, style: selectedStyle, layout: selectedLayout, mode: buildMode, story_model: document.getElementById('storyModel').value}),
+    body: JSON.stringify({description: desc || null, num_scenes: scenes, style: selectedStyle, layout: selectedLayout, mode: buildMode, story_model: document.getElementById('storyModel').value, suspense_opening: document.getElementById('suspenseOpening').checked}),
   }).then(r => r.json()).then(data => {
     currentStory = data.story;
     if (data.story._duplicate_warning) {

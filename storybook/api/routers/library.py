@@ -324,15 +324,27 @@ def _story_to_dict(folder_name: str, story_data: dict) -> dict:
         "scene_count": len(story_data.get("scenes", [])),
         "created_at": None,
         "characters": story_data.get("characters", []),
-        "scenes": [
-            {
-                "scene_number": s.get("scene_number"),
-                "text": s.get("text"),
-                "background": s.get("background"),
-                "image_url": f"/api/v1/stories/{folder_name}/scenes/{s.get('scene_number')}/image",
-            }
-            for s in story_data.get("scenes", [])
-        ],
+        "suspense_opening": story_data.get("suspense_opening", False),
+        "suspense_scene": story_data.get("suspense_scene"),
+        "hook_text": story_data.get("hook_text"),
+        "scenes": (
+            # Prepend virtual Scene 0 for suspense openings
+            ([{
+                "scene_number": 0,
+                "text": story_data.get("hook_text", ""),
+                "background": "",
+                "image_url": f"/api/v1/stories/{folder_name}/scenes/{story_data.get('suspense_scene', 1)}/image",
+            }] if story_data.get("suspense_opening") and story_data.get("hook_text") else [])
+            + [
+                {
+                    "scene_number": s.get("scene_number"),
+                    "text": s.get("text"),
+                    "background": s.get("background"),
+                    "image_url": f"/api/v1/stories/{folder_name}/scenes/{s.get('scene_number')}/image",
+                }
+                for s in story_data.get("scenes", [])
+            ]
+        ),
     }
 
 

@@ -321,6 +321,13 @@ class TextOverlay:
         """
         Apply speech-bubble text overlays to all scene images.
 
+        If the story has ``suspense_opening: true``, a virtual Scene 0 is
+        created by reading the suspense scene's raw image and overlaying
+        the ``hook_text`` on it.  Scene 0 gets the title banner; Scene 1
+        does not.  This means Scene 0 is always dynamically derived from
+        the suspense scene's current image — if that image is QC-fixed,
+        Scene 0 updates automatically on the next render.
+
         Args:
             story: The structured story data
             raw_image_paths: Paths to the raw generated images
@@ -334,6 +341,40 @@ class TextOverlay:
         output_paths = []
         total = len(story["scenes"])
 
+        has_suspense = story.get("suspense_opening") and story.get("hook_text")
+
+        # ── Virtual Scene 0 (suspense cold-open) ──
+        if has_suspense:
+            suspense_sn = story["suspense_scene"]
+            hook_text = story["hook_text"]
+
+            # Find the raw image for the suspense scene
+            suspense_raw = None
+            for raw_path, scene in zip(raw_image_paths, story["scenes"]):
+                if scene["scene_number"] == suspense_sn:
+                    suspense_raw = raw_path
+                    break
+
+            if suspense_raw and os.path.exists(suspense_raw):
+                scene0_path = os.path.join(output_dir, "scene_00.jpg")
+                if progress_callback:
+                    progress_callback(0, total, "overlaying")
+
+                self.overlay_text_on_image(
+                    image_path=suspense_raw,
+                    text=hook_text,
+                    output_path=scene0_path,
+                    scene_number=0,
+                    total_scenes=total,
+                    title=story["title"],  # Title banner on the cold-open
+                    moral=None,
+                )
+                output_paths.append(scene0_path)
+
+                if progress_callback:
+                    progress_callback(0, total, "done")
+
+        # ── Regular scenes ──
         for i, (scene, raw_path) in enumerate(zip(story["scenes"], raw_image_paths)):
             scene_num = scene["scene_number"]
             filename = f"scene_{scene_num:02d}.jpg"
@@ -342,13 +383,16 @@ class TextOverlay:
             if progress_callback:
                 progress_callback(scene_num, total, "overlaying")
 
+            # Title goes on Scene 0 when suspense opening is active
+            show_title = (scene_num == 1 and not has_suspense)
+
             self.overlay_text_on_image(
                 image_path=raw_path,
                 text=scene["text"],
                 output_path=output_path,
                 scene_number=scene_num,
                 total_scenes=total,
-                title=story["title"] if scene_num == 1 else None,
+                title=story["title"] if show_title else None,
                 moral=story.get("moral") if scene_num == total else None,
             )
 

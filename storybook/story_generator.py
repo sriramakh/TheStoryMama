@@ -472,6 +472,7 @@ class StoryGenerator:
         character_names_prompt: str | None = None,
         existing_titles: set[str] | None = None,
         existing_plots: list[str] | None = None,
+        suspense_opening: bool = False,
     ) -> dict:
         """
         Generate a structured children's story.
@@ -609,6 +610,38 @@ class StoryGenerator:
             f"look like a generic default. Vary from the typical curly-brown-hair-pink-dress look."
         )
 
+        # Suspense opening — ask LLM to structure story with a dramatic hook
+        if suspense_opening:
+            parts.append("""SUSPENSE OPENING STRUCTURE — THIS IS CRITICAL:
+This story uses a "cold open" structure. The reader will see a DRAMATIC moment from the
+MIDDLE of the story BEFORE the story begins, creating suspense and curiosity.
+
+You MUST include these two extra fields in your JSON response (at the top level, alongside "title"):
+
+  "suspense_opening": true,
+  "suspense_scene": <scene_number>,   // which scene number IS the suspense/conflict peak
+  "hook_text": "<1-2 sentence dramatic teaser that makes the reader NEED to know what happens>"
+
+RULES FOR THE SUSPENSE OPENING:
+1. The hook_text is shown BEFORE scene 1 as a teaser. It must create genuine curiosity.
+2. suspense_scene should be a scene in the middle third of the story (scenes 4-8 for a 12-scene story).
+3. The hook_text must reference the SPECIFIC dramatic moment — not a generic "Oh no!"
+
+SUSPENSE TYPE — Pick ONE (do NOT always use "missing object"):
+- DISCOVERY: "There was something glowing inside the old tree trunk..."
+- DANGER: "The wooden bridge creaked — and then it CRACKED!"
+- MYSTERY: "Who left a trail of purple footprints across the kitchen floor?"
+- EMOTIONAL: "Nana looked at the letter and her smile disappeared..."
+- RACE/CHALLENGE: "The sun was setting — they had to reach the hilltop before dark!"
+- TRANSFORMATION: "When Caleb opened his eyes, the garden looked completely different..."
+- UNEXPECTED VISITOR: "Something was sitting on the porch. Something BIG."
+- IMPOSSIBLE CHOICE: "She could only carry one — the golden egg or the baby bird."
+- STRANGE SOUND: "A melody drifted from inside the locked music box... but nobody had wound it."
+- VANISHING: "The painting on the wall was different this morning. The cat in it was GONE."
+
+The hook should feel genuinely surprising and UNIQUE to THIS story. Never use "Oh no!" or
+"What happened?" as the hook — those are generic. Be specific and dramatic.""")
+
         user_content = "\n\n".join(parts)
 
         response = self.client.chat.completions.create(
@@ -626,6 +659,22 @@ class StoryGenerator:
 
         # Validate the story structure
         self._validate_story(story_data, num_scenes)
+
+        # Post-process suspense opening
+        if suspense_opening:
+            story_data["suspense_opening"] = True
+            # Validate the LLM returned the required fields
+            if "suspense_scene" not in story_data or "hook_text" not in story_data:
+                # Fallback: pick the middle scene and generate a hook
+                mid = len(story_data["scenes"]) // 2
+                story_data["suspense_scene"] = story_data["scenes"][mid]["scene_number"]
+                if "hook_text" not in story_data:
+                    story_data["hook_text"] = story_data["scenes"][mid]["text"]
+            # Ensure suspense_scene is a valid scene number
+            valid_nums = {s["scene_number"] for s in story_data["scenes"]}
+            if story_data["suspense_scene"] not in valid_nums:
+                mid = len(story_data["scenes"]) // 2
+                story_data["suspense_scene"] = story_data["scenes"][mid]["scene_number"]
 
         return story_data
 
